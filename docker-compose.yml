@@ -1,0 +1,56 @@
+# 이 프로젝트 전용 MySQL(+ 선택적으로 앱) 컨테이너
+#
+#   docker compose up -d                 # DB만 실행 (앱은 IDE/gradlew 로 실행할 때)
+#   docker compose --profile app up -d   # DB + 앱 같이 실행 (시연/배포)
+#   docker compose down                  # 중지 (데이터는 볼륨에 남음)
+#   docker compose down -v               # 중지 + 데이터까지 삭제 (DB 초기화)
+#
+# 호스트 포트 3308 을 쓴다. 이 PC의 3306(MariaDB), 3307(MySQL 설치본)과 겹치지 않게 하기 위해서다.
+
+name: shop
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: shop-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root1234}
+      MYSQL_DATABASE: shop            # 최초 실행 시 shop DB 생성
+      MYSQL_USER: shop                # shop 계정 생성 + shop DB 권한 부여
+      MYSQL_PASSWORD: shop1234
+      TZ: Asia/Seoul
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "3308:3306"
+    volumes:
+      - shop-mysql-data:/var/lib/mysql
+      # 최초 실행(볼륨이 비어 있을 때)에만 실행: shop_test DB 생성 + 권한
+      - ./scripts/docker-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ushop", "-pshop1234"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    profiles: ["app"]
+    build: .
+    container_name: shop-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # 컨테이너끼리는 서비스 이름(db)과 컨테이너 내부 포트(3306)로 접속한다
+      DB_URL: jdbc:mysql://db:3306/shop?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: shop
+      DB_PASSWORD: shop1234
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}   # local = 시연 데이터 포함
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-key-change-me-0123456789abcdef}
+      TZ: Asia/Seoul
+    ports:
+      - "8080:8080"
+
+volumes:
+  shop-mysql-data:
