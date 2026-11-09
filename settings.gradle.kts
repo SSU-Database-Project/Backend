@@ -1,1 +1,1 @@
-rootProject.name = "database_2"
+rootProject.name = "shop"

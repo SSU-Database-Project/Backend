@@ -100,7 +100,7 @@ H2 대신 실제 MySQL로 테스트하는 이유: CHECK·복합 FK·REGEXP 동�
 ## 3. 패키지 구조
 
 ```
-com.readmate
+com.ssu.shop
 ├── global      config(Security, Swagger, CORS, 관리자 초기화) / security(JWT) / common(응답, 페이징) / error
 └── domain
     ├── user      회원가입·로그인·내 정보, 관리자 회원 관리          (BE-1)
