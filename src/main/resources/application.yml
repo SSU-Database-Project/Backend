@@ -1,0 +1,64 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: shop
+  profiles:
+    # 별도 지정이 없으면 local (시연 데이터 포함). 배포 시 SPRING_PROFILES_ACTIVE=prod
+    default: local
+  datasource:
+    # 로컬 MySQL 8.0 (이 PC는 3306=MariaDB, 3307=MySQL 8.0)
+    url: ${DB_URL:jdbc:mysql://localhost:3307/shop?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:shop}
+    password: ${DB_PASSWORD:shop1234}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    # 스키마는 Flyway(db/migration)가 만든다. JPA는 엔티티-테이블 일치 여부만 검증한다.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        default_batch_fetch_size: 100
+        jdbc:
+          time_zone: Asia/Seoul
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    time-zone: Asia/Seoul
+
+jwt:
+  # 운영/시연 서버에서는 반드시 JWT_SECRET 환경변수로 교체 (HS256: 32바이트 이상)
+  secret: ${JWT_SECRET:local-dev-only-secret-key-change-me-0123456789abcdef}
+  access-token-validity-seconds: ${JWT_VALIDITY_SECONDS:3600}
+
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+  admin:
+    email: ${ADMIN_EMAIL:admin@shop.com}
+    password: ${ADMIN_PASSWORD:admin1234!}
+    name: 관리자
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+
+---
+# local 프로필: 시연용 판매자·브랜드·상품 데이터(db/demo/R__demo_data.sql)를 함께 적용
+spring:
+  config:
+    activate:
+      on-profile: local
+  flyway:
+    locations: classpath:db/migration,classpath:db/demo
