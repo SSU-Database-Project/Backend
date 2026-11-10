@@ -382,6 +382,12 @@ public class ProductService {
         return ProductDetailResponse.of(product, optionRepository.findAllWithColorAndSize(product.getId()));
     }
 
+    /** 다른 도메인(좋아요 목록 등)이 상품 목록을 같은 모양으로 보여줄 때 사용. 총 재고는 IN 일괄 조회 1번 */
+    public List<ProductSummaryResponse> summarize(List<Product> products) {
+        Map<Long, Integer> stocks = totalStocksOf(products);
+        return products.stream().map(p -> ProductSummaryResponse.of(p, stocks.getOrDefault(p.getId(), 0))).toList();
+    }
+
     private PageResponse<ProductSummaryResponse> toSummaryPage(Page<Product> result) {
         Map<Long, Integer> stocks = totalStocksOf(result.getContent());
         return PageResponse.of(result, p -> ProductSummaryResponse.of(p, stocks.getOrDefault(p.getId(), 0)));
