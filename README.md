@@ -26,7 +26,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 | [F. 재고](#f-재고) | BE-2 | 1 / 3 | 🔶 DB만 완료 |
 | [G. 장바구니](#g-장바구니) | BE-2 | 1 / 2 | 🔶 DB만 완료 |
 | [H. 주문·배송](#h-주문배송) | BE-2 | 1 / 6 | 🔶 DB만 완료 |
-| [I. 통계](#i-통계) | BE-1 | 0 / 4 | ⬜ 시작 전 |
+| [I. 통계](#i-통계) | BE-1 | 4 / 4 | ✅ 완료 |
 | [팀 결정](#팀-결정) | 팀 | 0 / 4 | ⬜ |
 
 순서: **F(재고 변경 서비스) → H(주문)**. I(통계)는 B의 시연 주문 데이터가 있으면 H를 기다리지 않고 시작할 수 있습니다.
@@ -86,14 +86,14 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [ ] 판매자 배송 상태 변경, 확정된 주문 목록
 
 ### I. 통계
-- [ ] 판매자 기간별(일/주/월) 판매량·매출
-- [ ] 상품별 판매 순위
-- [ ] 관리자 전체 판매 통계
-- [ ] 통계 쿼리 EXPLAIN 확인
+- [x] 판매자 기간별(일/주/월) 판매량·매출 (`GET /api/seller/stats/sales`, 빈 구간은 0으로 채움) + 대시보드 요약 (`/summary`)
+- [x] 상품별 판매 순위 (`GET /api/seller/stats/products/top`, 판매량·매출순)
+- [x] 관리자 전체 판매 통계 (`GET /api/admin/stats/sales`)
+- [x] 통계 쿼리 EXPLAIN 확인 → 처리할 배송 수 조회에 V5 인덱스 추가 ([5.5](#55-통계-쿼리-측정과-v5-인덱스-2026-11-11))
 
 ### 팀 결정
 - [ ] 백엔드 역할 분담 확정
-- [ ] 통계에 넣을 주문 기준 (추천: 취소만 제외, 주문일 기준)
+- [ ] 통계에 넣을 주문 기준 — **지금 구현: 취소만 제외, 주문일 기준** (다르게 정하면 `StatsRepository` 조건만 바꾸면 됨)
 - [ ] 회의 결정사항 문서의 "확인 요청" 항목 (대표 이미지 1장, 카테고리·색상·사이즈 목록 등)
 - [ ] 배포 방식 (A 트랙과 같은 항목)
 
@@ -175,7 +175,7 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
 ```
 
 - 단위·보안 테스트는 DB 없이 실행됩니다.
-- **DB 테스트**는 `DB_TEST_URL`이 있을 때만 실행됩니다: DB 제약 검증 18개(`SchemaConstraintTest`), 같은 이메일 동시 가입 10건(`ConcurrentSignupTest`).
+- **DB 테스트**는 `DB_TEST_URL`이 있을 때만 실행됩니다: DB 제약 검증 18개(`SchemaConstraintTest`), 통계 SQL 7개(`StatsQueryTest`: 취소 제외, 주·월 묶음, 자정 경계), 같은 이메일 동시 가입 10건(`ConcurrentSignupTest`).
 
 ```powershell
 # PowerShell (Docker DB 기준. 직접 설치한 MySQL이면 3307)
@@ -210,6 +210,7 @@ com.ssu.shop
     ├── category  카테고리 트리, 색상·사이즈 목록 (고정 데이터)                         (BE-1)
     ├── product   상품·옵션 등록·수정·삭제·조회, 관리자 승인·거절·차단                  (BE-1)
     ├── like      좋아요 추가·취소·내 목록                                             (BE-1)
+    ├── stats     판매 통계: 판매자 일/주/월·상품 순위·대시보드, 관리자 전체                 (BE-1)
     ├── inventory 재고 이력 엔티티 (재고 로직은 BE-2)
     ├── cart      엔티티 골격 (BE-2)
     └── order     주문·판매자별 배송·주문 상품 엔티티 골격 (BE-2)
@@ -221,7 +222,8 @@ src/main/resources
 │   ├── V1__init.sql                        최초 스키마 (테이블 11개 + 제약)
 │   ├── V2__seed_categories.sql             최초 카테고리 (V4에서 교체)
 │   ├── V3__tune_product_list_indexes.sql   상품 목록 인덱스 개선 (5장)
-│   └── V4__fashion_mall_redesign.sql       패션몰 재설계 (6장) — 현재 스키마
+│   ├── V4__fashion_mall_redesign.sql       패션몰 재설계 (6장) — 현재 스키마
+│   └── V5__shipments_seller_status_index.sql  판매자 상태별 배송 인덱스 (5.5)
 ├── db/demo
 │   ├── R__demo_data.sql                    시연 데이터: 회원·브랜드·상품·좋아요 (local 프로필만)
 │   └── R__demo_orders.sql                  시연 주문 90일치 (local 프로필만)
@@ -468,7 +470,8 @@ erDiagram
 | `products(status, created_at)` | 관리자 승인 대기 목록 — PENDING은 소수라 status의 선택도가 높다 |
 | `products(brand_id, product_code)` UNIQUE | 브랜드 페이지·판매자 상품 목록, 품번 중복 검사 |
 | `product_options(product_id, color_id, size_id)` UNIQUE | 상세 화면 옵션, 목록 총 재고 일괄 조회 |
-| `shipments(seller_id, created_at)` | 판매자 주문 관리 목록 |
+| `shipments(seller_id, created_at)` | 판매자 주문 관리 목록, 판매자 통계(판매자 + 기간 범위 스캔) |
+| `shipments(seller_id, status, created_at)` *(V5)* | 판매자 대시보드 "처리할 배송 수", 상태별 주문 관리 목록 |
 | `likes(user_id, created_at)` | 내 좋아요 최신순 |
 
 ### 5.2 처음 설계(V1)의 문제와 개선(V3)
@@ -510,7 +513,26 @@ V4 스키마에 대량 데이터를 넣고 `EXPLAIN ANALYZE`로 실제 실행을
 - **키워드 검색(530ms)은 알려진 한계입니다.** 앞에 `%`가 붙은 LIKE는 B-Tree 인덱스를 못 씁니다. 게다가 상품명·브랜드명·품번이 두 테이블에 걸쳐 있어 FULLTEXT 인덱스 하나로도 해결되지 않습니다. 시연 규모(상품 수십 개)에서는 문제없고, 커지면 검색용 컬럼과 ngram FULLTEXT를 2차 과제로 검토합니다.
 - 시연 데이터(상품 29개)처럼 테이블이 아주 작으면 옵티마이저가 인덱스 대신 풀스캔을 고릅니다. 그 편이 더 싸기 때문이고 정상입니다.
 
-### 5.5 N+1 확인
+### 5.5 통계 쿼리 측정과 V5 인덱스 (2026-11-11)
+
+같은 대량 데이터(주문 5만, 주문 라인 6.7만, 판매자 20명)로 통계 쿼리를 측정했습니다. 집계 기준은 "취소만 제외, 주문일 기준"입니다(팀 확정 전 제안).
+
+| 쿼리 | 실행 계획 | 실제 시간 |
+| --- | --- | --- |
+| 판매자 일별 30일 | `idx_shipments_seller_created` **범위 스캔 하나로 판매자 + 기간**을 좁힌 뒤 주문 라인 조인 | **7 ms** |
+| 판매자 상품 순위 30일 | 위와 같음 → 옵션 → 상품 PK 조인, 상위 10개 | **20 ms** |
+| 판매자 월별 12개월 | 위와 같음 (판매자의 1년치 2,300건) | 103 ms |
+| 플랫폼 일별 30일 | `idx_orders_created` 범위 → 배송 묶음 → 라인 | 134 ms |
+| 플랫폼 월별 12개월 | 위와 같음, 1년치 주문 5만 건 전부 | **2.2 s** |
+| 처리할 배송 수 (V4) | 판매자의 배송 2,500건을 모두 읽고 상태로 거름 | 10.7 ms |
+| 처리할 배송 수 (**V5**) | `idx_shipments_seller_status_created` **커버링** 범위 스캔, 진행 중 30건만 | **0.34 ms** |
+
+- **판매자 통계는 `shipments.created_at`을 기준으로 씁니다.** 배송 묶음은 주문과 같은 트랜잭션에서 만들어져 시각이 같습니다. 그래서 `orders`를 조인하지 않고 `(seller_id, created_at)` 인덱스 하나로 "이 판매자의 이 기간"을 바로 찾습니다.
+- **V5 `(seller_id, status, created_at)`**: 상태를 인덱스 안에서 거르게 되어, 판매자 대시보드가 진행 중인 배송만 읽습니다. BE-2가 만들 "상태별 주문 관리 목록(최신순)"도 같은 인덱스를 커버링으로 씁니다(0.44 ms).
+- **플랫폼 1년치 월별(2.2초)은 실시간 집계의 한계입니다.** 매번 1년치 주문 라인을 전부 조인해서 더합니다. 시연 규모(주문 수백 건)에서는 문제없고, 데이터가 커지면 일별 집계 테이블 `daily_sales(date, seller_id, quantity, revenue)`를 두고 그 테이블을 GROUP BY 하는 것이 다음 단계입니다(2차 과제).
+- 기간은 `[from 00:00, to+1일 00:00)` 반열린 구간으로 조회합니다. `BETWEEN`은 끝날 23:59:59.xxx 경계를 놓치기 쉽습니다. 이 경계는 `StatsQueryTest`에서 23:59:59.999 주문과 다음 날 0시 주문으로 확인합니다.
+
+### 5.6 N+1 확인
 
 `GET /api/products` 한 번에 쿼리 3개입니다: ① products + brands + categories JOIN ② count ③ `product_options WHERE product_id IN (...) GROUP BY product_id`(총 재고). 상세는 상품 1번 + 옵션(색상·사이즈 fetch join) 1번입니다. 상품 수와 상관없이 일정합니다.
 
@@ -525,6 +547,9 @@ V4 스키마에 대량 데이터를 넣고 `EXPLAIN ANALYZE`로 실제 실행을
 | 11-09 | 상품 목록 인덱스 재설계 (V3) | 5만 건 EXPLAIN에서 풀스캔 + filesort 발견 |
 | 11-09 | Docker 구성 (`docker-compose.yml`, `Dockerfile`) | 팀원 환경 통일, 다른 프로젝트 DB와 분리 |
 | 11-10 | **패션몰 재설계 (V4)** — 회의 결정 반영 | 아래 표 |
+| 11-11 | 좋아요 API (트랙 E) | 회의 결정: 내가 좋아요 누른 상품 목록 |
+| 11-11 | 시연 주문 90일치 `R__demo_orders.sql`, 정합성 검사 15종 `scripts/check-integrity.sql` (트랙 B) | 통계 시연, 재고·주문 정합성 확인 |
+| 11-11 | 판매 통계 API + **V5** `shipments(seller_id, status, created_at)` (트랙 I) | 통계 쿼리 EXPLAIN 결과 (5.5) |
 
 **V4 변경 내용 (2026-11-10 회의)**
 
