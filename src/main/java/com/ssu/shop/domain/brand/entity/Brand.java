@@ -1,7 +1,6 @@
 package com.ssu.shop.domain.brand.entity;
 
 import com.ssu.shop.domain.seller.entity.Seller;
-import com.ssu.shop.domain.seller.entity.SellerStatus;
 import com.ssu.shop.global.common.BaseTimeEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,7 +19,10 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-/** brands: 승인 상태는 판매자와 같은 PENDING/APPROVED/REJECTED 를 사용 */
+/**
+ * brands: 판매자가 등록하고 관리자가 승인한다. 승인된 브랜드에만 상품을 등록할 수 있다.
+ * 모든 상품이 브랜드에 속하므로 "상품의 판매자"는 brands.seller_id 로 정해진다.
+ */
 @Entity
 @Table(name = "brands")
 @Getter
@@ -32,7 +34,7 @@ public class Brand extends BaseTimeEntity {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "seller_id", nullable = false)
+    @JoinColumn(name = "seller_id", nullable = false, updatable = false)
     private Seller seller;
 
     @Column(nullable = false, length = 100)
@@ -47,14 +49,17 @@ public class Brand extends BaseTimeEntity {
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(nullable = false, length = 20)
-    private SellerStatus status;
+    private BrandStatus status;
+
+    @Column(name = "reject_reason")
+    private String rejectReason;
 
     private Brand(Seller seller, String name, String description, String logoUrl) {
         this.seller = seller;
         this.name = name;
         this.description = description;
         this.logoUrl = logoUrl;
-        this.status = SellerStatus.PENDING;
+        this.status = BrandStatus.PENDING;
     }
 
     public static Brand create(Seller seller, String name, String description, String logoUrl) {
@@ -66,6 +71,6 @@ public class Brand extends BaseTimeEntity {
     }
 
     public boolean isApproved() {
-        return status == SellerStatus.APPROVED;
+        return status == BrandStatus.APPROVED;
     }
 }

@@ -4,7 +4,7 @@ import com.ssu.shop.domain.brand.dto.BrandDtos.AdminBrandResponse;
 import com.ssu.shop.domain.brand.dto.BrandDtos.BrandResponse;
 import com.ssu.shop.domain.brand.dto.BrandDtos.BrandStatusChangeRequest;
 import com.ssu.shop.domain.brand.service.BrandService;
-import com.ssu.shop.domain.seller.entity.SellerStatus;
+import com.ssu.shop.domain.brand.entity.BrandStatus;
 import com.ssu.shop.global.common.ApiResponse;
 import com.ssu.shop.global.common.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "Admin - Brand", description = "브랜드 승인/거절 (명세서 추가 제안 API)")
+@Tag(name = "Admin - Brand", description = "브랜드 승인/거절")
 @RestController
 @RequestMapping("/api/admin/brands")
 @RequiredArgsConstructor
@@ -34,7 +34,7 @@ public class AdminBrandController {
     @Operation(summary = "브랜드 신청 목록")
     @GetMapping
     public ApiResponse<PageResponse<AdminBrandResponse>> list(
-            @RequestParam(required = false) SellerStatus status,
+            @RequestParam(required = false) BrandStatus status,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.success(brandService.search(status,
@@ -45,6 +45,6 @@ public class AdminBrandController {
     @PatchMapping("/{brandId}/status")
     public ApiResponse<BrandResponse> changeStatus(@PathVariable Long brandId,
                                                    @Valid @RequestBody BrandStatusChangeRequest request) {
-        return ApiResponse.success(brandService.changeStatus(brandId, request.status()));
+        return ApiResponse.success(brandService.changeStatus(brandId, request));
     }
 }

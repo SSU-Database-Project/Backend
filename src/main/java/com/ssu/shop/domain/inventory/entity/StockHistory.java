@@ -1,7 +1,7 @@
 package com.ssu.shop.domain.inventory.entity;
 
 import com.ssu.shop.domain.order.entity.OrderItem;
-import com.ssu.shop.domain.product.entity.Product;
+import com.ssu.shop.domain.product.entity.ProductOption;
 import com.ssu.shop.global.common.BaseCreatedEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,7 +20,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-/** stock_history: INSERT 만 하는 append-only 로그 */
+/** stock_history: 옵션 단위 재고 변동 이력. INSERT 만 하는 append-only 로그 */
 @Entity
 @Table(name = "stock_history")
 @Getter
@@ -32,13 +32,13 @@ public class StockHistory extends BaseCreatedEntity {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
+    @JoinColumn(name = "option_id", nullable = false)
+    private ProductOption option;
 
     @Column(name = "change_qty", nullable = false)
     private Integer changeQty;
 
-    /** 변동 후 재고 (도출 가능하지만 이력 화면 표시 및 inventory 와의 정합성 검사용으로 저장) */
+    /** 변동 후 재고 (도출 가능하지만 이력 화면 표시 및 옵션 재고와의 정합성 검사용으로 저장) */
     @Column(name = "quantity_after", nullable = false)
     private Integer quantityAfter;
 
@@ -55,9 +55,9 @@ public class StockHistory extends BaseCreatedEntity {
     @Column(length = 255)
     private String memo;
 
-    private StockHistory(Product product, int changeQty, int quantityAfter, StockType type,
+    private StockHistory(ProductOption option, int changeQty, int quantityAfter, StockType type,
                          OrderItem orderItem, String memo) {
-        this.product = product;
+        this.option = option;
         this.changeQty = changeQty;
         this.quantityAfter = quantityAfter;
         this.type = type;
@@ -65,21 +65,21 @@ public class StockHistory extends BaseCreatedEntity {
         this.memo = memo;
     }
 
-    public static StockHistory inbound(Product product, int quantity, int quantityAfter, String memo) {
-        return new StockHistory(product, quantity, quantityAfter, StockType.IN, null, memo);
+    public static StockHistory inbound(ProductOption option, int quantity, int quantityAfter, String memo) {
+        return new StockHistory(option, quantity, quantityAfter, StockType.IN, null, memo);
     }
 
-    public static StockHistory adjust(Product product, int changeQty, int quantityAfter, String memo) {
-        return new StockHistory(product, changeQty, quantityAfter, StockType.ADJUST, null, memo);
+    public static StockHistory adjust(ProductOption option, int changeQty, int quantityAfter, String memo) {
+        return new StockHistory(option, changeQty, quantityAfter, StockType.ADJUST, null, memo);
     }
 
     /** [BE-2] 주문 차감: changeQty 는 음수로 기록 */
-    public static StockHistory order(Product product, int orderedQty, int quantityAfter, OrderItem orderItem) {
-        return new StockHistory(product, -orderedQty, quantityAfter, StockType.ORDER, orderItem, null);
+    public static StockHistory order(ProductOption option, int orderedQty, int quantityAfter, OrderItem orderItem) {
+        return new StockHistory(option, -orderedQty, quantityAfter, StockType.ORDER, orderItem, null);
     }
 
     /** [BE-2] 주문 취소 복원 */
-    public static StockHistory cancel(Product product, int restoredQty, int quantityAfter, OrderItem orderItem) {
-        return new StockHistory(product, restoredQty, quantityAfter, StockType.CANCEL, orderItem, null);
+    public static StockHistory cancel(ProductOption option, int restoredQty, int quantityAfter, OrderItem orderItem) {
+        return new StockHistory(option, restoredQty, quantityAfter, StockType.CANCEL, orderItem, null);
     }
 }

@@ -3,6 +3,7 @@ package com.ssu.shop.db;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ssu.shop.domain.user.dto.AuthDtos.SignupRequest;
+import com.ssu.shop.domain.user.entity.Role;
 import com.ssu.shop.domain.user.service.AuthService;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
@@ -69,7 +70,7 @@ class ConcurrentSignupTest {
                 ready.countDown();
                 start.await(); // 모든 스레드가 준비된 뒤 동시에 출발
                 try {
-                    authService.signup(new SignupRequest(email, "password1!", "동시가입", null));
+                    authService.signup(new SignupRequest(email, "password1!", "동시가입", null, Role.USER, null));
                     return "OK";
                 } catch (BusinessException e) {
                     return e.getErrorCode().name();

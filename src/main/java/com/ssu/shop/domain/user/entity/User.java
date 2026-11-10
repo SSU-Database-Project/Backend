@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -51,6 +52,10 @@ public class User extends BaseTimeEntity {
     @Column(nullable = false, length = 20)
     private UserStatus status;
 
+    /** DB CHECK: status = WITHDRAWN 과 withdrawn_at IS NOT NULL 은 항상 함께 참/거짓 */
+    @Column(name = "withdrawn_at")
+    private LocalDateTime withdrawnAt;
+
     private User(String email, String encodedPassword, String name, String phone, Role role) {
         this.email = email;
         this.password = encodedPassword;
@@ -60,26 +65,45 @@ public class User extends BaseTimeEntity {
         this.status = UserStatus.ACTIVE;
     }
 
-    public static User create(String email, String encodedPassword, String name, String phone) {
-        return new User(email, encodedPassword, name, phone, Role.USER);
+    /** 가입 시 USER 또는 SELLER 를 고른다. ADMIN 은 가입으로 만들 수 없다(서비스에서 거부). */
+    public static User create(String email, String encodedPassword, String name, String phone, Role role) {
+        if (role == Role.ADMIN) {
+            throw new IllegalArgumentException("관리자 계정은 가입으로 만들 수 없습니다.");
+        }
+        return new User(email, encodedPassword, name, phone, role);
     }
 
     public static User createAdmin(String email, String encodedPassword, String name) {
         return new User(email, encodedPassword, name, null, Role.ADMIN);
     }
 
-    /** 판매자 승인 시 호출. sellers.status 변경과 같은 트랜잭션에서 실행되어야 한다. */
-    public void promoteToSeller() {
-        if (role == Role.USER) {
-            this.role = Role.SELLER;
+    /** 정지 / 해제. 탈퇴는 withdraw() 로만 한다. */
+    public void changeStatus(UserStatus status) {
+        if (status == UserStatus.WITHDRAWN) {
+            throw new IllegalArgumentException("탈퇴는 withdraw() 로 처리합니다.");
         }
+        this.status = status;
     }
 
-    public void changeStatus(UserStatus status) {
-        this.status = status;
+    /**
+     * 탈퇴 처리: 행은 남기고(주문 기록이 참조) 개인정보만 지운다.
+     * 이메일은 UNIQUE 라 빈 값으로 둘 수 없어 id 기반 값으로 바꾼다 → 같은 이메일로 다시 가입할 수 있다.
+     * 비밀번호는 어떤 입력과도 맞지 않는 값으로 바꿔 로그인을 막는다.
+     */
+    public void withdraw(String unusablePassword) {
+        this.email = "withdrawn_" + id + "@withdrawn.local";
+        this.password = unusablePassword;
+        this.name = "탈퇴회원";
+        this.phone = null;
+        this.status = UserStatus.WITHDRAWN;
+        this.withdrawnAt = LocalDateTime.now();
     }
 
     public boolean isActive() {
         return status == UserStatus.ACTIVE;
+    }
+
+    public boolean isWithdrawn() {
+        return status == UserStatus.WITHDRAWN;
     }
 }

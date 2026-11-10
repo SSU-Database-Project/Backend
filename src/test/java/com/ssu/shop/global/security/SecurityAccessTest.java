@@ -62,10 +62,18 @@ class SecurityAccessTest {
     }
 
     @Test
-    void 비회원도_상품_목록은_조회할_수_있다() throws Exception {
+    void 회원제_비회원은_상품_목록도_401() throws Exception {
+        mockMvc.perform(get("/api/products"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void 로그인한_일반회원은_상품_목록을_조회할_수_있다() throws Exception {
         when(productService.searchPublic(any(), any(), any(), any(), anyInt(), anyInt())).thenReturn((PageResponse) EMPTY);
 
-        mockMvc.perform(get("/api/products"))
+        mockMvc.perform(get("/api/products")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(1L, Role.USER, UserStatus.ACTIVE)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
@@ -108,23 +116,28 @@ class SecurityAccessTest {
                 .andExpect(status().isForbidden());
     }
 
-    /** 토큰의 role 이 아니라 DB 의 최신 role 로 판단한다: 토큰은 USER 로 발급됐지만 DB 에서 SELLER 로 승인된 경우 */
+    /** 토큰의 role 이 아니라 DB 의 최신 role 로 판단한다: 토큰에는 SELLER 라고 적혀 있어도 DB 가 USER 면 403 */
     @Test
-    void 승인_직후_재로그인_없이도_DB의_최신_role이_반영된다() throws Exception {
-        User user = Fixtures.user(3L, "u3@test.com");
-        String oldToken = "Bearer " + jwtProvider.createAccessToken(3L, Role.USER);
-        user.promoteToSeller();
+    void 토큰의_role이_아니라_DB의_최신_role로_판단한다() throws Exception {
+        User user = Fixtures.user(3L, "u3@test.com", Role.USER);
+        String forgedRoleToken = "Bearer " + jwtProvider.createAccessToken(3L, Role.SELLER);
         when(userRepository.findById(3L)).thenReturn(Optional.of(user));
-        when(productService.myProducts(eq(3L), any(), anyInt(), anyInt())).thenReturn((PageResponse) EMPTY);
 
-        mockMvc.perform(get("/api/seller/products").header(HttpHeaders.AUTHORIZATION, oldToken))
-                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/seller/products").header(HttpHeaders.AUTHORIZATION, forgedRoleToken))
+                .andExpect(status().isForbidden());
     }
 
     @Test
     void 정지된_회원의_토큰은_만료_전이라도_401() throws Exception {
         mockMvc.perform(get("/api/seller/products")
                         .header(HttpHeaders.AUTHORIZATION, tokenFor(4L, Role.SELLER, UserStatus.SUSPENDED)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 탈퇴한_회원의_토큰도_401() throws Exception {
+        mockMvc.perform(get("/api/products")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(5L, Role.USER, UserStatus.WITHDRAWN)))
                 .andExpect(status().isUnauthorized());
     }
 }

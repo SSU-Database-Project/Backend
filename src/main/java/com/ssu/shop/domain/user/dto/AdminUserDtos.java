@@ -13,11 +13,11 @@ public final class AdminUserDtos {
 
     /** 비밀번호 해시는 절대 응답에 포함하지 않는다 */
     public record AdminUserResponse(Long id, String email, String name, String phone, Role role,
-                                    UserStatus status, LocalDateTime createdAt) {
+                                    UserStatus status, LocalDateTime createdAt, LocalDateTime withdrawnAt) {
 
         public static AdminUserResponse from(User u) {
             return new AdminUserResponse(u.getId(), u.getEmail(), u.getName(), u.getPhone(), u.getRole(),
-                    u.getStatus(), u.getCreatedAt());
+                    u.getStatus(), u.getCreatedAt(), u.getWithdrawnAt());
         }
     }
 

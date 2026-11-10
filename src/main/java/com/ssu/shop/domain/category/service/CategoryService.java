@@ -1,30 +1,24 @@
 package com.ssu.shop.domain.category.service;
 
-import com.ssu.shop.domain.category.dto.CategoryDtos.CategoryCreateRequest;
 import com.ssu.shop.domain.category.dto.CategoryDtos.CategoryResponse;
-import com.ssu.shop.domain.category.dto.CategoryDtos.CategoryUpdateRequest;
 import com.ssu.shop.domain.category.entity.Category;
 import com.ssu.shop.domain.category.repository.CategoryRepository;
-import com.ssu.shop.domain.product.repository.ProductRepository;
 import com.ssu.shop.global.error.BusinessException;
-import com.ssu.shop.global.error.ErrorCode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** 카테고리는 마이그레이션 시드로 고정된 데이터라 조회만 한다(회의 결정). */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
-    private final ProductRepository productRepository;
 
     /**
      * 카테고리 트리. 부모마다 자식을 조회하면 N+1 이 되므로 전체를 쿼리 1번으로 읽고 메모리에서 조립한다.
@@ -55,76 +49,5 @@ public class CategoryService {
 
     public Category getCategory(Long categoryId) {
         return categoryRepository.findById(categoryId).orElseThrow(() -> BusinessException.notFound("카테고리"));
-    }
-
-    // ===== 관리자 =====
-
-    @Transactional
-    public CategoryResponse create(CategoryCreateRequest request) {
-        Category parent = null;
-        if (request.parentId() != null) {
-            parent = getCategory(request.parentId());
-            if (!parent.isRoot()) {
-                throw new BusinessException(ErrorCode.CATEGORY_DEPTH_EXCEEDED);
-            }
-        }
-        String name = request.name().trim();
-        validateNameUnique(parent == null ? null : parent.getId(), name);
-
-        Category category = Category.create(parent, name,
-                request.displayOrder() == null ? 0 : request.displayOrder());
-        try {
-            categoryRepository.saveAndFlush(category);
-        } catch (DataIntegrityViolationException e) {
-            throw new BusinessException(ErrorCode.DUPLICATE_CATEGORY_NAME);
-        }
-        return CategoryResponse.leaf(category);
-    }
-
-    @Transactional
-    public CategoryResponse update(Long categoryId, CategoryUpdateRequest request) {
-        Category category = getCategory(categoryId);
-        String name = request.name() == null ? null : request.name().trim();
-        if (name != null && !name.equals(category.getName())) {
-            validateNameUnique(category.getParentId(), name);
-        }
-        category.update(name, request.displayOrder());
-        try {
-            categoryRepository.flush();
-        } catch (DataIntegrityViolationException e) {
-            throw new BusinessException(ErrorCode.DUPLICATE_CATEGORY_NAME);
-        }
-        return CategoryResponse.leaf(category);
-    }
-
-    /**
-     * 하위 카테고리나 상품이 있으면 삭제 불가.
-     * 사전 확인은 사용자 메시지용이고, 동시에 상품이 등록되는 경우는 FK(RESTRICT)가 최종적으로 막는다.
-     */
-    @Transactional
-    public void delete(Long categoryId) {
-        Category category = getCategory(categoryId);
-        if (categoryRepository.hasChildren(categoryId) || productRepository.existsByCategory_Id(categoryId)) {
-            throw new BusinessException(ErrorCode.CATEGORY_IN_USE);
-        }
-        try {
-            categoryRepository.delete(category);
-            categoryRepository.flush();
-        } catch (DataIntegrityViolationException e) {
-            throw new BusinessException(ErrorCode.CATEGORY_IN_USE);
-        }
-    }
-
-    /**
-     * UNIQUE(parent_id, name) 은 parent_id 가 NULL 인 대분류끼리의 중복을 막지 못한다(MySQL 에서 NULL ≠ NULL).
-     * 그래서 대분류는 서비스에서 확인한다. 소분류는 DB 제약도 함께 막는다.
-     */
-    private void validateNameUnique(Long parentId, String name) {
-        boolean duplicated = Objects.isNull(parentId)
-                ? categoryRepository.existsByParentIsNullAndName(name)
-                : categoryRepository.existsByParent_IdAndName(parentId, name);
-        if (duplicated) {
-            throw new BusinessException(ErrorCode.DUPLICATE_CATEGORY_NAME);
-        }
     }
 }

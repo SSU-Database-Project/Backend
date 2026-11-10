@@ -4,8 +4,6 @@ import com.ssu.shop.domain.user.entity.User;
 import com.ssu.shop.global.common.BaseTimeEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -13,14 +11,14 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
-import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
-/** sellers: users 와 1:0..1 (user_id UNIQUE) */
+/**
+ * sellers: users 와 1:0..1 (user_id UNIQUE).
+ * 가입할 때 "판매자"를 고르면 회원 행과 같은 트랜잭션에서 만들어진다. 승인 단계는 없다(V4).
+ */
 @Entity
 @Table(name = "sellers")
 @Getter
@@ -45,42 +43,14 @@ public class Seller extends BaseTimeEntity {
     @Column(name = "representative_name", nullable = false, length = 50)
     private String representativeName;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(nullable = false, length = 20)
-    private SellerStatus status;
-
-    @Column(name = "reject_reason")
-    private String rejectReason;
-
-    @Column(name = "approved_at")
-    private LocalDateTime approvedAt;
-
     private Seller(User user, String businessNumber, String companyName, String representativeName) {
         this.user = user;
         this.businessNumber = businessNumber;
         this.companyName = companyName;
         this.representativeName = representativeName;
-        this.status = SellerStatus.PENDING;
     }
 
-    public static Seller apply(User user, String businessNumber, String companyName, String representativeName) {
+    public static Seller create(User user, String businessNumber, String companyName, String representativeName) {
         return new Seller(user, businessNumber, companyName, representativeName);
-    }
-
-    /**
-     * 거절된 회원의 재신청. user_id 가 UNIQUE 이므로 새 행을 INSERT 하지 않고 기존 행을 갱신한다.
-     */
-    public void reapply(String businessNumber, String companyName, String representativeName) {
-        this.businessNumber = businessNumber;
-        this.companyName = companyName;
-        this.representativeName = representativeName;
-        this.status = SellerStatus.PENDING;
-        this.rejectReason = null;
-        this.approvedAt = null;
-    }
-
-    public boolean isApproved() {
-        return status == SellerStatus.APPROVED;
     }
 }

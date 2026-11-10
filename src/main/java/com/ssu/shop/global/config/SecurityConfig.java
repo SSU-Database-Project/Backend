@@ -44,14 +44,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/error").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        // 비회원 허용
+                        // 회원제: 가입·로그인만 비회원 허용, 나머지(상품 조회 포함)는 로그인 필요 (회의 결정)
                         .requestMatchers(HttpMethod.POST, "/api/auth/signup", "/api/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**", "/api/brands/**")
-                        .permitAll()
+                        // 이미지는 <img> 태그가 JWT 헤더 없이 불러오므로 공개 (파일명이 UUID 라 추측 불가)
+                        .requestMatchers(HttpMethod.GET, "/images/**").permitAll()
                         // URL 프리픽스 단위 권한
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
-                        .requestMatchers(HttpMethod.POST, "/api/sellers").hasRole("USER")
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, userRepository),
                         UsernamePasswordAuthenticationFilter.class);

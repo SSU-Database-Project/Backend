@@ -1,7 +1,7 @@
 package com.ssu.shop.domain.product.controller;
 
+import com.ssu.shop.domain.product.dto.ProductDtos.AdminProductStatusRequest;
 import com.ssu.shop.domain.product.dto.ProductDtos.ProductDetailResponse;
-import com.ssu.shop.domain.product.dto.ProductDtos.ProductStatusChangeRequest;
 import com.ssu.shop.domain.product.dto.ProductDtos.ProductSummaryResponse;
 import com.ssu.shop.domain.product.entity.ProductStatus;
 import com.ssu.shop.domain.product.service.ProductService;
@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "Admin - Product", description = "전체 상품 조회 / 부적절 상품 차단")
+@Tag(name = "Admin - Product", description = "상품 승인 / 거절 / 차단")
 @RestController
 @RequestMapping("/api/admin/products")
 @RequiredArgsConstructor
@@ -29,7 +29,7 @@ public class AdminProductController {
 
     private final ProductService productService;
 
-    @Operation(summary = "전체 상품 목록 (모든 상태)")
+    @Operation(summary = "전체 상품 목록", description = "status=PENDING 이면 승인 대기 목록 (먼저 신청한 순)")
     @GetMapping
     public ApiResponse<PageResponse<ProductSummaryResponse>> list(
             @RequestParam(required = false) ProductStatus status,
@@ -39,10 +39,18 @@ public class AdminProductController {
         return ApiResponse.success(productService.adminSearch(status, keyword, page, size));
     }
 
-    @Operation(summary = "상품 상태 변경", description = "BLOCKED = 관리자 차단 (판매자가 해제 불가)")
+    @Operation(summary = "상품 상세 (모든 상태)")
+    @GetMapping("/{productId}")
+    public ApiResponse<ProductDetailResponse> detail(@PathVariable Long productId) {
+        return ApiResponse.success(productService.adminDetail(productId));
+    }
+
+    @Operation(summary = "승인 / 거절 / 차단 / 차단 해제",
+            description = "ON_SALE: 승인(PENDING→) 또는 차단 해제(BLOCKED→), REJECTED: 거절(PENDING→, 사유), "
+                    + "BLOCKED: 차단(ON_SALE·SOLD_OUT→)")
     @PatchMapping("/{productId}/status")
     public ApiResponse<ProductDetailResponse> changeStatus(@PathVariable Long productId,
-                                                           @Valid @RequestBody ProductStatusChangeRequest request) {
-        return ApiResponse.success(productService.adminChangeStatus(productId, request.status()));
+                                                           @Valid @RequestBody AdminProductStatusRequest request) {
+        return ApiResponse.success(productService.adminChangeStatus(productId, request));
     }
 }

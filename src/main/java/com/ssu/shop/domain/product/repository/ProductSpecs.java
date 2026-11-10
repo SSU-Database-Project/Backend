@@ -15,6 +15,10 @@ public final class ProductSpecs {
         return (root, query, cb) -> root.get("status").in(statuses);
     }
 
+    public static Specification<Product> statusNot(ProductStatus status) {
+        return (root, query, cb) -> cb.notEqual(root.get("status"), status);
+    }
+
     public static Specification<Product> categoryIn(Collection<Long> categoryIds) {
         return (root, query, cb) -> root.get("category").get("id").in(categoryIds);
     }
@@ -23,16 +27,21 @@ public final class ProductSpecs {
         return (root, query, cb) -> cb.equal(root.get("brand").get("id"), brandId);
     }
 
+    /** 판매자는 상품에 직접 저장되지 않고 brands.seller_id 로 정해진다 → brands 조인 */
     public static Specification<Product> sellerEq(Long sellerId) {
-        return (root, query, cb) -> cb.equal(root.get("seller").get("id"), sellerId);
+        return (root, query, cb) -> cb.equal(root.get("brand").get("seller").get("id"), sellerId);
     }
 
     /**
-     * LIKE '%키워드%' — 앞 와일드카드 때문에 B-Tree 인덱스를 쓸 수 없다(풀스캔). 시연 규모에서는 허용,
-     * 데이터가 커지면 ngram FULLTEXT 인덱스로 전환(계획서 4.8). 사용자가 입력한 % _ 는 이스케이프한다.
+     * 검색바: 상품명 · 브랜드명 · 품번 중 하나라도 부분 일치 (회의 결정).
+     * LIKE '%키워드%' 는 앞 와일드카드 때문에 B-Tree 인덱스를 쓸 수 없다(풀스캔). 시연 규모에서는 허용하고,
+     * 데이터가 커지면 ngram FULLTEXT 인덱스로 바꾼다. 사용자가 입력한 % _ 는 이스케이프한다.
      */
-    public static Specification<Product> nameContains(String keyword) {
-        String escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-        return (root, query, cb) -> cb.like(root.get("name"), "%" + escaped + "%", '\\');
+    public static Specification<Product> keywordContains(String keyword) {
+        String pattern = "%" + keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+        return (root, query, cb) -> cb.or(
+                cb.like(root.get("name"), pattern, '\\'),
+                cb.like(root.get("brand").get("name"), pattern, '\\'),
+                cb.like(root.get("productCode"), pattern, '\\'));
     }
 }

@@ -1,8 +1,11 @@
 package com.ssu.shop.domain.category.entity;
 
+import com.ssu.shop.domain.product.entity.SizeGroup;
 import com.ssu.shop.global.common.BaseCreatedEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -13,9 +16,13 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
- * categories: parent_id 자기참조. NULL = 대분류, NOT NULL = 소분류 (최대 2단계).
+ * categories: parent_id 자기참조. NULL = 대분류, NOT NULL = 소분류 (2단계).
+ * 패션 분류로 고정된 데이터다(V4 시드). 관리자 화면에서 바꾸지 않는다.
+ * size_group 은 이 분류의 상품이 고를 수 있는 사이즈 목록(sizes.size_group)을 정한다.
  * children 컬렉션은 매핑하지 않는다 — 트리는 전체를 1번 조회한 뒤 메모리에서 조립(N+1 방지).
  */
 @Entity
@@ -35,26 +42,24 @@ public class Category extends BaseCreatedEntity {
     @Column(nullable = false, length = 50)
     private String name;
 
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "size_group", nullable = false, length = 20)
+    private SizeGroup sizeGroup;
+
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 
-    private Category(Category parent, String name, int displayOrder) {
+    private Category(Category parent, String name, SizeGroup sizeGroup, int displayOrder) {
         this.parent = parent;
         this.name = name;
+        this.sizeGroup = sizeGroup;
         this.displayOrder = displayOrder;
     }
 
-    public static Category create(Category parent, String name, int displayOrder) {
-        return new Category(parent, name, displayOrder);
-    }
-
-    public void update(String name, Integer displayOrder) {
-        if (name != null) {
-            this.name = name;
-        }
-        if (displayOrder != null) {
-            this.displayOrder = displayOrder;
-        }
+    /** 테스트 데이터용. 운영 데이터는 마이그레이션 시드로만 넣는다. */
+    public static Category create(Category parent, String name, SizeGroup sizeGroup, int displayOrder) {
+        return new Category(parent, name, sizeGroup, displayOrder);
     }
 
     public boolean isRoot() {
