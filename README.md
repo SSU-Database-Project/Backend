@@ -19,7 +19,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 | 트랙 | 담당 | 진행 | 상태 |
 | --- | --- | --- | --- |
 | [A. 공통 기반·인프라](#a-공통-기반인프라) | BE-1 | 6 / 9 | 🔶 거의 완료 |
-| [B. DB 설계·데이터](#b-db-설계데이터) | BE-1 | 3 / 6 | 🔶 시연 주문·성능 확인 남음 |
+| [B. DB 설계·데이터](#b-db-설계데이터) | BE-1 | 6 / 6 | ✅ 완료 |
 | [C. 회원·판매자](#c-회원판매자) | BE-1 | 4 / 4 | ✅ 완료 |
 | [D. 브랜드·상품](#d-브랜드상품) | BE-1 | 5 / 5 | ✅ 완료 |
 | [E. 좋아요](#e-좋아요) | BE-1 | 3 / 3 | ✅ 완료 |
@@ -46,9 +46,9 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [x] 스키마 V1~V4 (테이블 14개, 제약조건), DB 제약 테스트 18개
 - [x] 시연 데이터: 회원·판매자·브랜드·상품 27개와 옵션·좋아요
 - [x] ERD·설계 근거 정리 (4장), 명세서 DB 확정안
-- [ ] 시연 주문 데이터 (90일치) + 정합성 검사 (재고 = 마지막 이력, 주문 합계 = 라인 합계)
-- [ ] 대량 데이터로 V4 기본 정렬(먼저 등록한 순) 인덱스 사용 측정
-- [ ] 주문·통계 쿼리 EXPLAIN, 필요하면 인덱스 보강 (V5)
+- [x] 시연 주문 데이터 (90일치, `R__demo_orders.sql`) + 정합성 검사 15종 (`scripts/check-integrity.sql`)
+- [x] 대량 데이터로 V4 목록 쿼리 측정 — 먼저 등록한 순 0.16ms ([5.4](#54-v4-쿼리-측정-mysql-80-상품-50000--주문-50000--판매자-20-2026-11-11))
+- [x] 주문 쿼리 EXPLAIN — 내 주문·판매자 배송 목록 모두 커버링 인덱스, V5 불필요 (통계 쿼리는 트랙 I)
 
 ### C. 회원·판매자
 - [x] 가입 (일반회원 / 판매자 선택, 판매자는 사업자 정보), 로그인, 내 정보
@@ -156,9 +156,11 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
 | `store.a@demo.com` | 판매자 | 어반스타일 — 브랜드 URBAN BASIC, URBAN STEP, 상품 20개 |
 | `store.b@demo.com` | 판매자 | 무드랩 — 브랜드 MOODLAB, MOODLAB ATELIER(승인 대기), 상품 7개 |
 | `store.c@demo.com` | 판매자 | 새싹상점 — 브랜드 없음 (브랜드 등록·승인 시연용) |
-| `buyer1@demo.com`, `buyer2@demo.com` | 일반 회원 | 좋아요 몇 개가 들어 있음 |
+| `buyer1@demo.com` ~ `buyer8@demo.com` | 일반 회원 | 시연 주문을 나눠 가짐. buyer1·2에는 좋아요도 있음 |
 
-상품에는 승인 대기(PENDING) 2개, 거절(REJECTED) 1개, 판매자 수동 품절(SOLD_OUT) 1개, 모든 옵션 재고 0(품절 표시) 1개가 섞여 있습니다. 옵션 일부는 재고가 0이라 사이즈별 품절도 볼 수 있습니다. 주문 데이터는 BE-2 주문 기능 완성 후 추가합니다.
+상품에는 승인 대기(PENDING) 2개, 거절(REJECTED) 1개, 판매자 수동 품절(SOLD_OUT) 1개, 모든 옵션 재고 0(품절 표시) 1개가 섞여 있습니다. 옵션 일부는 재고가 0이라 사이즈별 품절도 볼 수 있습니다.
+
+**시연 주문** (`db/demo/R__demo_orders.sql`): 최근 90일에 걸친 주문 약 300건입니다(최근일수록 조금 더 많음). 한 주문에 판매자가 여럿인 경우도 있어 판매자별 배송을 볼 수 있습니다. 배송 상태는 주문 나이에 따라 정해지고(오래된 주문은 대부분 구매확정, 최근 주문은 배송준비·주문완료), 약 8%는 취소되어 재고가 복원돼 있습니다. 재고 이력(입고 → 주문 → 취소)도 시간순으로 맞춰 넣었습니다. 시연 주문이 이미 있으면 다시 넣지 않으며, 새로 만들려면 DB를 초기화합니다(`docker compose down -v`).
 
 **샘플 이미지.** 시연 상품은 품목(소분류)별 샘플 이미지 `/images/samples/{품목}.jpg`를 씁니다. 파일은 `src/main/resources/static/images/samples/`에 넣습니다. 필요한 파일: `tee, longsleeve, shirt, knit, hoodie, jacket, coat, padding, cardigan, denim, slacks, training, shorts, dress, skirt, sneakers, loafers, backpack, crossbag, cap, beanie, socks` (각각 `.jpg`).
 
@@ -188,6 +190,12 @@ Gradle은 환경변수 변화를 입력값으로 보지 않아 이전 결과(DB 
 
 H2 대신 실제 MySQL로 테스트하는 이유: CHECK·FK·REGEXP 동작이 MySQL과 달라, H2에서 통과해도 DB 제약을 검증한 것이 아니기 때문입니다.
 
+**데이터 정합성 검사** — DB 제약으로 표현할 수 없는, 여러 행·테이블에 걸친 규칙 15가지(옵션 재고 = 마지막 재고 이력, 주문 총액 = 라인 합계, 배송 묶음의 판매자 = 옵션의 판매자 등)를 확인합니다. 모든 `bad`가 0이어야 정상입니다. 시연 데이터나 주문·재고 로직을 바꾼 뒤에 돌립니다.
+
+```bash
+mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3308 -u shop -pshop1234 shop < scripts/check-integrity.sql
+```
+
 ---
 
 ## 3. 패키지 구조
@@ -215,7 +223,8 @@ src/main/resources
 │   ├── V3__tune_product_list_indexes.sql   상품 목록 인덱스 개선 (5장)
 │   └── V4__fashion_mall_redesign.sql       패션몰 재설계 (6장) — 현재 스키마
 ├── db/demo
-│   └── R__demo_data.sql                    시연 데이터 (local 프로필만)
+│   ├── R__demo_data.sql                    시연 데이터: 회원·브랜드·상품·좋아요 (local 프로필만)
+│   └── R__demo_orders.sql                  시연 주문 90일치 (local 프로필만)
 └── static/images/samples                   시연용 샘플 이미지
 ```
 
@@ -481,9 +490,27 @@ erDiagram
 | 전체 가격 낮은순 | 풀스캔 + filesort | `idx_products_price` 정순 스캔 | 50,000 → **20** | 185 ms → **0.13 ms** |
 | 소분류 최신순 | range + filesort | `idx_products_category_created` 역순 | 2,500 → **27** | 28.7 ms → **0.20 ms** |
 
-V4의 기본 정렬(먼저 등록한 순)은 같은 인덱스를 정방향으로 읽습니다. 시연 데이터(상품 29개)처럼 테이블이 아주 작으면 옵티마이저가 인덱스 대신 풀스캔을 고르는데, 그 편이 더 싸기 때문이고 정상입니다.
+### 5.4 V4 쿼리 측정 (MySQL 8.0, 상품 50,000 · 주문 50,000 · 판매자 20, 2026-11-11)
 
-### 5.4 N+1 확인
+V4 스키마에 대량 데이터를 넣고 `EXPLAIN ANALYZE`로 실제 실행을 확인했습니다(측정 후 삭제).
+
+| 쿼리 | 실행 계획 | 읽은 행 | 실제 시간 |
+| --- | --- | --- | --- |
+| 홈: 공개 상품, 먼저 등록한 순 | `idx_products_created` **정방향** 스캔, 20건 찾으면 멈춤 | 20 | **0.16 ms** |
+| 소분류 목록 | `idx_products_category_created` | 약 20 | **0.31 ms** |
+| 대분류 목록 (소분류 5개 포함) | `idx_products_created` 정방향 + 카테고리 필터 | 52 | **0.24 ms** |
+| 관리자 승인 대기 목록 | `idx_products_status_created` (PENDING 3%) | 20 | **0.36 ms** |
+| 목록의 총 재고 (상품 20개) | `uk_product_options_combination` IN 조회 | 20 | **0.20 ms** |
+| 내 주문 목록 | `idx_orders_user_created` 역순, **커버링** | 20 | **0.03 ms** |
+| 판매자 배송 묶음 목록 | `idx_shipments_seller_created` 역순, **커버링** | 20 | **0.11 ms** |
+| 판매자 내 상품 (상품 2,500개인 판매자) | 브랜드별 `uk_products_brand_code` 조회 → 정렬 | 2,500 | **22 ms** |
+| 키워드 검색 `LIKE '%…%'` | `idx_products_created` 전체 스캔 + 필터 | 50,000 | **530 ms** |
+
+- **판매자 내 상품(22ms)은 정규화의 대가입니다.** V4에서 `products.seller_id`를 지웠기 때문에(이행 종속 제거) 판매자의 상품은 브랜드를 거쳐 찾고, 여러 브랜드에 걸친 최신순은 한꺼번에 정렬합니다. 판매자당 상품 2,500개에서 22ms라 판매자 센터 화면에는 충분합니다. `seller_id`를 다시 넣으면 빨라지지만, 상품과 브랜드의 판매자가 어긋나지 않게 막는 제약(V3의 복합 FK)이 다시 필요해집니다. 그래서 넣지 않았습니다.
+- **키워드 검색(530ms)은 알려진 한계입니다.** 앞에 `%`가 붙은 LIKE는 B-Tree 인덱스를 못 씁니다. 게다가 상품명·브랜드명·품번이 두 테이블에 걸쳐 있어 FULLTEXT 인덱스 하나로도 해결되지 않습니다. 시연 규모(상품 수십 개)에서는 문제없고, 커지면 검색용 컬럼과 ngram FULLTEXT를 2차 과제로 검토합니다.
+- 시연 데이터(상품 29개)처럼 테이블이 아주 작으면 옵티마이저가 인덱스 대신 풀스캔을 고릅니다. 그 편이 더 싸기 때문이고 정상입니다.
+
+### 5.5 N+1 확인
 
 `GET /api/products` 한 번에 쿼리 3개입니다: ① products + brands + categories JOIN ② count ③ `product_options WHERE product_id IN (...) GROUP BY product_id`(총 재고). 상세는 상품 1번 + 옵션(색상·사이즈 fetch join) 1번입니다. 상품 수와 상관없이 일정합니다.
 
