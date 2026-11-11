@@ -51,6 +51,8 @@ public class SecurityConfig {
                         // URL 프리픽스 단위 권한
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
+                        // 좋아요는 일반회원 기능 (회의 결정)
+                        .requestMatchers("/api/products/*/like", "/api/users/me/likes").hasRole("USER")
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, userRepository),
                         UsernamePasswordAuthenticationFilter.class);
