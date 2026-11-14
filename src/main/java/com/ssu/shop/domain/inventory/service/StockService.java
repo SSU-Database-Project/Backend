@@ -43,6 +43,17 @@ public class StockService {
     private final StockHistoryRepository stockHistoryRepository;
     private final EntityManager entityManager;
 
+    /**
+     * 재고를 바꾸지 않고 옵션 행만 미리 잠근다 (id 오름차순). 주문 생성이 주문 줄을 저장하기 전에 부른다.
+     *
+     * 먼저 잠가야 하는 이유: 주문 줄(order_items)을 INSERT 하면 MySQL 이 외래키 확인을 위해 옵션 행에 공유 잠금을 건다.
+     * 그 뒤에 재고를 잠그려 하면(배타 잠금) 동시에 들어온 주문끼리 서로의 공유 잠금이 풀리기를 기다리다 데드락이 난다.
+     * 배타 잠금을 먼저 잡아 두면 다음 주문은 여기서 줄을 서고, 뒤이은 decrease 는 이미 잡은 잠금을 그대로 쓴다.
+     */
+    public void lock(Collection<Long> optionIds) {
+        lockOptions(optionIds);
+    }
+
     /** 주문 차감. 하나라도 재고가 모자라면 OUT_OF_STOCK — 트랜잭션이 롤백되어 앞에서 차감한 것도 되돌아간다. */
     public void decrease(List<OrderItem> orderItems) {
         Map<Long, ProductOption> options = lockOptions(optionIdsOf(orderItems));

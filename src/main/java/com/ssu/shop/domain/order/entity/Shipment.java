@@ -1,9 +1,9 @@
 package com.ssu.shop.domain.order.entity;
 
 import com.ssu.shop.domain.seller.entity.Seller;
-import com.ssu.shop.global.common.BaseTimeEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
@@ -19,18 +19,23 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 /**
- * [BE-2 골격] shipments: 한 주문 안의 판매자별 배송 묶음. UNIQUE(order_id, seller_id).
+ * shipments: 한 주문 안의 판매자별 배송 묶음. UNIQUE(order_id, seller_id).
  * 판매자가 배송 상태를 바꾸고(ORDERED → PREPARING → SHIPPING → DELIVERED),
  * 구매자가 배송완료 후 구매확정(CONFIRMED)하면 더 이상 바꿀 수 없다. 취소도 판매자별(ORDERED 에서만).
  * DB CHECK: CONFIRMED ⇔ confirmed_at 존재, CANCELED ⇔ canceled_at 존재.
+ *
+ * created_at 에는 주문의 created_at 과 같은 값을 직접 넣는다 (판매자 통계가 이 값을 주문 시각으로 쓴다).
  */
 @Entity
 @Table(name = "shipments")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Shipment extends BaseTimeEntity {
+@EntityListeners(AuditingEntityListener.class)
+public class Shipment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -54,4 +59,23 @@ public class Shipment extends BaseTimeEntity {
 
     @Column(name = "canceled_at")
     private LocalDateTime canceledAt;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    private Shipment(Order order, Seller seller) {
+        this.order = order;
+        this.seller = seller;
+        this.status = ShipmentStatus.ORDERED;
+        this.createdAt = order.getCreatedAt();
+    }
+
+    /** 주문완료(ORDERED) 상태로 만들고, 생성 시각은 주문과 같은 값으로 맞춘다 */
+    public static Shipment create(Order order, Seller seller) {
+        return new Shipment(order, seller);
+    }
 }
