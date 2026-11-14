@@ -5,9 +5,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssu.shop.domain.like.controller.LikeController;
+import com.ssu.shop.domain.like.service.LikeService;
 import com.ssu.shop.domain.product.controller.ProductController;
 import com.ssu.shop.domain.product.controller.SellerProductController;
 import com.ssu.shop.domain.product.service.ProductService;
@@ -34,7 +37,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** URL 프리픽스 권한 + 401/403 공통 응답 JSON 검증 (DB 없이 실행) */
-@WebMvcTest(controllers = {ProductController.class, SellerProductController.class, AdminUserController.class})
+@WebMvcTest(controllers = {ProductController.class, SellerProductController.class, AdminUserController.class,
+        LikeController.class})
 @Import({SecurityConfig.class, JwtProvider.class, SecurityErrorHandlers.class})
 @EnableConfigurationProperties({JwtProperties.class, AppProperties.class})
 class SecurityAccessTest {
@@ -50,6 +54,8 @@ class SecurityAccessTest {
     ProductService productService;
     @MockitoBean
     AdminUserService adminUserService;
+    @MockitoBean
+    LikeService likeService;
 
     private static final PageResponse<Object> EMPTY = new PageResponse<>(List.of(), 0, 20, 0, 0);
 
@@ -139,5 +145,15 @@ class SecurityAccessTest {
         mockMvc.perform(get("/api/products")
                         .header(HttpHeaders.AUTHORIZATION, tokenFor(5L, Role.USER, UserStatus.WITHDRAWN)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 좋아요는_일반회원만_판매자는_403() throws Exception {
+        mockMvc.perform(post("/api/products/1/like")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(2L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/users/me/likes")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(6L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
     }
 }
