@@ -54,4 +54,12 @@ public class CartItem extends BaseTimeEntity {
     public static CartItem create(Cart cart, ProductOption option, int quantity) {
         return new CartItem(cart, option, quantity);
     }
+
+    public void changeQuantity(int quantity) {
+        this.quantity = quantity;
+    }
+
+    public void changeSelected(boolean selected) {
+        this.selected = selected;
+    }
 }

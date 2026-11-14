@@ -53,6 +53,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/seller/**").hasRole("SELLER")
                         // 좋아요는 일반회원 기능 (회의 결정)
                         .requestMatchers("/api/products/*/like", "/api/users/me/likes").hasRole("USER")
+                        // [BE-2] 장바구니·주문도 일반회원 기능 (명세서 API 표의 권한 USER)
+                        .requestMatchers("/api/cart/**", "/api/orders/**").hasRole("USER")
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, userRepository),
                         UsernamePasswordAuthenticationFilter.class);
