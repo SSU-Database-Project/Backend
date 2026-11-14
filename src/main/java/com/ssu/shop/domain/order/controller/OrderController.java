@@ -7,13 +7,19 @@ import com.ssu.shop.global.common.ApiResponse;
 import com.ssu.shop.global.security.LoginUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.ssu.shop.global.common.PageResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -36,5 +42,41 @@ public class OrderController {
     public ApiResponse<OrderResponse> create(@AuthenticationPrincipal LoginUser loginUser,
                                              @Valid @RequestBody OrderCreateRequest request) {
         return ApiResponse.success(orderService.create(loginUser.id(), request));
+    }
+
+    @Operation(summary = "내 주문 목록 (최신순)",
+            description = "주문마다 판매자별 배송 묶음(shipments)과 그 상태, 주문 줄(items)이 들어 있다. "
+                    + "totalPrice 는 주문 당시 전체 금액이라 일부가 취소돼도 그대로다 — 취소된 금액은 status=CANCELED 인 묶음의 subtotal")
+    @GetMapping
+    public ApiResponse<PageResponse<OrderResponse>> myOrders(
+            @AuthenticationPrincipal LoginUser loginUser,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ApiResponse.success(orderService.myOrders(loginUser.id(), page, size));
+    }
+
+    @Operation(summary = "내 주문 상세", description = "내 주문이 아니면 NOT_FOUND(404)")
+    @GetMapping("/{orderId}")
+    public ApiResponse<OrderResponse> myOrder(@AuthenticationPrincipal LoginUser loginUser,
+                                              @PathVariable Long orderId) {
+        return ApiResponse.success(orderService.getMyOrder(loginUser.id(), orderId));
+    }
+
+    @Operation(summary = "주문 취소 — 판매자별 배송 묶음 단위, 주문완료(ORDERED)일 때만",
+            description = "그 배송 묶음의 상품 재고가 복원된다. 같은 주문의 다른 판매자 묶음은 그대로다. "
+                    + "오류: INVALID_ORDER_STATUS(409) 이미 배송준비 이후이거나 취소됨, NOT_FOUND(404) 내 주문이 아님")
+    @PostMapping("/{orderId}/shipments/{shipmentId}/cancel")
+    public ApiResponse<OrderResponse> cancel(@AuthenticationPrincipal LoginUser loginUser,
+                                             @PathVariable Long orderId, @PathVariable Long shipmentId) {
+        return ApiResponse.success(orderService.cancel(loginUser.id(), orderId, shipmentId));
+    }
+
+    @Operation(summary = "구매확정 — 배송완료(DELIVERED)일 때만",
+            description = "확정하면 CONFIRMED 가 되고 더 이상 바꿀 수 없다. "
+                    + "오류: INVALID_ORDER_STATUS(409) 배송완료 전이거나 이미 확정·취소됨, NOT_FOUND(404) 내 주문이 아님")
+    @PostMapping("/{orderId}/shipments/{shipmentId}/confirm")
+    public ApiResponse<OrderResponse> confirm(@AuthenticationPrincipal LoginUser loginUser,
+                                              @PathVariable Long orderId, @PathVariable Long shipmentId) {
+        return ApiResponse.success(orderService.confirm(loginUser.id(), orderId, shipmentId));
     }
 }
