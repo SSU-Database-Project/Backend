@@ -3,7 +3,8 @@ package com.ssu.shop.domain.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -92,8 +93,7 @@ class OrderServiceTest {
         // 저장하면 id 가 생기는 것을 흉내 낸다
         lenient().when(orderRepository.save(any(Order.class))).thenAnswer(inv -> withId(inv.getArgument(0)));
         lenient().when(shipmentRepository.save(any(Shipment.class))).thenAnswer(inv -> withId(inv.getArgument(0)));
-        lenient().when(cartItemRepository.deleteByIds(anyCollection()))
-                .thenAnswer(inv -> ((java.util.Collection<?>) inv.getArgument(0)).size());
+        lenient().when(cartItemRepository.deleteIfUnchanged(anyLong(), anyInt())).thenReturn(1);
     }
 
     @Test
@@ -139,7 +139,9 @@ class OrderServiceTest {
         ArgumentCaptor<List<OrderItem>> decreased = ArgumentCaptor.captor();
         order.verify(stockService).decrease(decreased.capture()); // 줄마다가 아니라 목록으로 한 번
         assertThat(decreased.getValue()).hasSize(2);
-        order.verify(cartItemRepository).deleteByIds(List.of(tee.getId(), cap.getId()));
+        // 읽은 그대로인지(수량) 조건을 붙여 한 줄씩 지운다
+        order.verify(cartItemRepository).deleteIfUnchanged(tee.getId(), 2);
+        order.verify(cartItemRepository).deleteIfUnchanged(cap.getId(), 1);
     }
 
     @Test
@@ -165,10 +167,10 @@ class OrderServiceTest {
     }
 
     @Test
-    void 주문하는_사이_장바구니_항목이_사라졌으면_DATA_CONFLICT_로_중복_주문을_막는다() {
+    void 주문하는_사이_장바구니_항목이_바뀌었거나_사라졌으면_DATA_CONFLICT() {
         when(cartItemRepository.findSelectedForOrder(BUYER))
                 .thenReturn(List.of(cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1)));
-        when(cartItemRepository.deleteByIds(anyCollection())).thenReturn(0); // 먼저 끝난 요청이 이미 지움
+        when(cartItemRepository.deleteIfUnchanged(anyLong(), anyInt())).thenReturn(0); // 그 사이 바뀌었거나 이미 지워짐
 
         assertError(ErrorCode.DATA_CONFLICT, () -> orderService.create(BUYER, REQUEST));
     }

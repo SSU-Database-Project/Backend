@@ -14,14 +14,19 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
 
 /**
  * [BE-2 골격] cart_items: 옵션(색상×사이즈) 단위. UNIQUE(cart_id, option_id) → 같은 옵션은 수량만 증가.
  * selected: 장바구니 체크 상태를 DB 에 저장해 다시 들어와도 유지한다(회의 결정). 합계는 selected 항목만.
  * 가격은 저장하지 않는다 — 장바구니는 항상 현재 가격으로 계산한다(주문의 스냅샷과 반대).
+ *
+ * @DynamicUpdate: 바뀐 컬럼만 UPDATE 한다. 없으면 체크만 바꿔도 읽어 둔 옛 수량까지 다시 써서,
+ * 그 사이 다른 요청이 담기로 늘린 수량이 사라진다. (수량 변경끼리 겹치면 마지막 요청의 값이 남는데, 사용자가 정한 값이라 그대로 둔다.)
  */
 @Entity
 @Table(name = "cart_items")
+@DynamicUpdate
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CartItem extends BaseTimeEntity {

@@ -10,6 +10,8 @@ import com.ssu.shop.domain.cart.dto.CartDtos.CartItemAddRequest;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartItemUpdateRequest;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartResponse;
 import com.ssu.shop.domain.cart.dto.CartItemState;
+import com.ssu.shop.domain.cart.entity.CartItem;
+import com.ssu.shop.domain.cart.repository.CartItemRepository;
 import com.ssu.shop.domain.cart.service.CartService;
 import com.ssu.shop.domain.inventory.dto.StockDtos.StockChangeRequest;
 import com.ssu.shop.domain.inventory.dto.StockDtos.StockHistoryResponse;
@@ -21,6 +23,14 @@ import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
 import com.ssu.shop.support.DbFixtures;
 import jakarta.persistence.EntityManagerFactory;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
@@ -33,6 +43,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 장바구니와 판매자 재고 API 의 서비스를 실제 MySQL 에서 검증한다.
@@ -66,6 +78,10 @@ class CartStockApiDbTest {
     JdbcTemplate jdbc;
     @Autowired
     EntityManagerFactory emf;
+    @Autowired
+    CartItemRepository cartItemRepository;
+    @Autowired
+    PlatformTransactionManager txManager;
 
     DbFixtures db;
 
@@ -254,7 +270,96 @@ class CartStockApiDbTest {
         assertThat(sellerStockService.history(sellerUser, teeBlack, 0, 20).content()).isEmpty();
     }
 
+    // ===== 동시 요청 =====
+
+    /**
+     * 장바구니가 없는 회원이 처음 담기를 동시에 두 번 보내는 경우 (버튼 두 번 누르기, 두 옵션을 연달아 담기).
+     * 한쪽이 장바구니를 만드는 동안 다른 쪽이 "장바구니 없음"으로 실패하면 안 된다. 타이밍 문제라 여러 회원으로 반복한다.
+     */
+    @Test
+    void 처음_담기를_동시에_두_번_보내도_둘_다_성공한다() throws Exception {
+        int rounds = 15;
+        List<String> failures = new ArrayList<>();
+        for (int i = 0; i < rounds; i++) {
+            long newBuyer = db.user("first" + i, "USER");
+            List<String> outcomes = runTogether(List.of(
+                    () -> addOutcome(newBuyer, teeBlack),
+                    () -> addOutcome(newBuyer, hoodBlack)));
+            outcomes.stream().filter(o -> !"OK".equals(o)).forEach(failures::add);
+            if (outcomes.stream().allMatch("OK"::equals)) {
+                assertThat(cartService.getCart(newBuyer).items()).extracting("optionId")
+                        .containsExactlyInAnyOrder(teeBlack, hoodBlack);
+            }
+        }
+        assertThat(failures).as("실패한 담기 (총 %d번 중)", rounds * 2).isEmpty();
+    }
+
+    /**
+     * 체크 변경과 같은 옵션 담기가 겹치는 경우: 체크 변경이 읽어 둔 옛 수량으로 덮어쓰면 담기한 수량이 사라진다.
+     * 체크 변경 트랜잭션이 항목을 읽은 뒤 멈춘 사이에 다른 트랜잭션이 담기를 커밋하게 해서 순서를 고정한다.
+     */
+    @Test
+    void 체크를_바꾸는_사이_같은_옵션을_더_담아도_늘어난_수량이_사라지지_않는다() throws Exception {
+        long itemId = cartService.add(buyer, new CartItemAddRequest(teeBlack, 1)).items().get(0).cartItemId();
+
+        new TransactionTemplate(txManager).executeWithoutResult(status -> {
+            CartItem item = cartItemRepository.findByIdAndUserId(itemId, buyer).orElseThrow(); // 수량 1 을 읽음
+            inAnotherThread(() -> cartService.add(buyer, new CartItemAddRequest(teeBlack, 2))); // 그 사이 3 으로 커밋
+            item.changeSelected(false); // 체크만 바꾼다
+        });
+
+        CartResponse cart = cartService.getCart(buyer);
+        assertThat(cart.items().get(0).selected()).isFalse();
+        assertThat(cart.items().get(0).quantity()).isEqualTo(3); // 1 로 덮어써지면 안 된다
+    }
+
     // ===== helpers =====
+
+    private String addOutcome(long buyerId, long optionId) {
+        try {
+            cartService.add(buyerId, new CartItemAddRequest(optionId, 1));
+            return "OK";
+        } catch (BusinessException e) {
+            return e.getErrorCode().name();
+        } catch (Exception e) {
+            return e.getClass().getSimpleName();
+        }
+    }
+
+    /** 모든 작업을 같은 순간에 출발시키고 결과를 넣은 순서대로 돌려준다 */
+    private List<String> runTogether(List<Callable<String>> tasks) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
+        CountDownLatch ready = new CountDownLatch(tasks.size());
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<String>> futures = new ArrayList<>();
+        for (Callable<String> task : tasks) {
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                start.await();
+                return task.call();
+            }));
+        }
+        ready.await();
+        start.countDown();
+        List<String> outcomes = new ArrayList<>();
+        for (Future<String> f : futures) {
+            outcomes.add(f.get(60, TimeUnit.SECONDS));
+        }
+        pool.shutdown();
+        return outcomes;
+    }
+
+    /** 다른 스레드(= 다른 DB 연결, 다른 트랜잭션)에서 실행하고 커밋될 때까지 기다린다 */
+    private void inAnotherThread(Runnable work) {
+        ExecutorService other = Executors.newSingleThreadExecutor();
+        try {
+            other.submit(work).get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        } finally {
+            other.shutdown();
+        }
+    }
 
     private void assertError(ErrorCode expected, ThrowingCallable call) {
         assertThatThrownBy(call).isInstanceOfSatisfying(BusinessException.class,

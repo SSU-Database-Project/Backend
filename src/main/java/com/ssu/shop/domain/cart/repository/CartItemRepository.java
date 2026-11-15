@@ -1,7 +1,6 @@
 package com.ssu.shop.domain.cart.repository;
 
 import com.ssu.shop.domain.cart.entity.CartItem;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -43,10 +42,14 @@ public interface CartItemRepository extends JpaRepository<CartItem, Long> {
             """)
     List<CartItem> findSelectedForOrder(@Param("userId") Long userId);
 
-    /** 주문한 항목을 한 문장으로 지우고 지운 줄 수를 돌려준다 (그 사이 장바구니가 바뀌었는지 확인하는 데 쓴다) */
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("delete from CartItem i where i.id in :ids")
-    int deleteByIds(@Param("ids") Collection<Long> ids);
+    /**
+     * 주문한 항목 하나를, 주문할 때 읽은 그대로(수량이 같고 아직 체크된 상태)일 때만 지운다. 지운 줄 수(0 또는 1)를 돌려준다.
+     * DELETE 는 트랜잭션 시작 시점이 아니라 지금 커밋된 값을 보므로, 주문하는 사이 다른 요청이 수량이나 체크를 바꿨거나
+     * 먼저 주문해 지웠다면 0 이 나온다 → 주문 서비스가 DATA_CONFLICT 로 전체를 롤백한다.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("delete from CartItem i where i.id = :id and i.quantity = :quantity and i.selected = true")
+    int deleteIfUnchanged(@Param("id") Long id, @Param("quantity") int quantity);
 
     /** 내 장바구니의 항목만 찾는다 (남의 항목 id 를 넣으면 없는 것으로 나온다) */
     @Query("select i from CartItem i where i.id = :id and i.cart.user.id = :userId")
