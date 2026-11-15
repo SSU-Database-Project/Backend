@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartItemAddRequest;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartItemUpdateRequest;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartResponse;
+import com.ssu.shop.domain.cart.repository.CartItemRepository;
 import com.ssu.shop.domain.cart.service.CartService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
@@ -41,6 +42,8 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 주문 생성을 실제 MySQL 에서 검증한다: 동시 주문, 실패 시 전체 롤백, 판매자별 배송 묶음과 시각, 정합성.
@@ -89,6 +92,10 @@ class OrderCreateDbTest {
     CartService cartService;
     @Autowired
     JdbcTemplate jdbc;
+    @Autowired
+    CartItemRepository cartItemRepository;
+    @Autowired
+    PlatformTransactionManager txManager;
 
     DbFixtures db;
 
@@ -205,6 +212,35 @@ class OrderCreateDbTest {
         assertError(ErrorCode.NO_ORDER_ITEMS, () -> orderService.create(buyer, ADDRESS)); // 담았지만 체크 안 함
     }
 
+    /**
+     * 주문이 장바구니를 읽은 뒤 끝나기 전에, 같은 회원의 다른 요청이 그 항목의 수량을 바꾸거나 체크를 푼 경우.
+     * 예전 값으로 주문하고 바뀐 항목까지 지우면 안 된다 → 주문 전체를 DATA_CONFLICT 로 거부하고 바뀐 장바구니는 남긴다.
+     * 순서를 고정하려고, 바깥 트랜잭션에서 장바구니를 먼저 읽고 → 다른 스레드가 변경을 커밋한 뒤 → 같은 트랜잭션에서 주문한다.
+     */
+    @Test
+    void 주문하는_사이_수량이나_체크가_바뀌면_DATA_CONFLICT_이고_바뀐_장바구니는_그대로_남는다() {
+        long buyer = db.user("buyer", "USER");
+        long itemId = cartService.add(buyer, new CartItemAddRequest(teeBlack, 1)).items().get(0).cartItemId();
+
+        // 1) 수량 변경: 주문은 수량 1 로 읽었는데 그 사이 3 이 됨
+        assertError(ErrorCode.DATA_CONFLICT, () -> orderAfterConcurrentChange(buyer,
+                () -> cartService.update(buyer, itemId, new CartItemUpdateRequest(3, null))));
+        assertNothingOrdered(buyer, 1);
+        assertThat(cartService.getCart(buyer).items().get(0).quantity()).isEqualTo(3);
+
+        // 2) 체크 해제: 주문은 체크된 항목으로 읽었는데 그 사이 체크를 풂
+        assertError(ErrorCode.DATA_CONFLICT, () -> orderAfterConcurrentChange(buyer,
+                () -> cartService.update(buyer, itemId, new CartItemUpdateRequest(null, false))));
+        assertNothingOrdered(buyer, 1);
+        assertThat(cartService.getCart(buyer).items().get(0).selected()).isFalse();
+
+        // 바뀐 상태로 다시 주문하면 정상 (체크를 다시 하고 수량 3 으로)
+        cartService.update(buyer, itemId, new CartItemUpdateRequest(null, true));
+        assertThat(orderService.create(buyer, ADDRESS).shipments().get(0).items().get(0).quantity()).isEqualTo(3);
+        assertThat(cartService.getCart(buyer).items()).isEmpty();
+        assertThat(stockOf(teeBlack)).isEqualTo(7);
+    }
+
     // ===== 주문 내용 =====
 
     @Test
@@ -247,6 +283,22 @@ class OrderCreateDbTest {
     }
 
     // ===== helpers =====
+
+    /** 한 트랜잭션 안에서: 체크한 장바구니를 먼저 읽고 → 다른 스레드가 change 를 커밋하게 한 뒤 → 주문한다 */
+    private void orderAfterConcurrentChange(long buyer, Runnable change) {
+        new TransactionTemplate(txManager).executeWithoutResult(status -> {
+            assertThat(cartItemRepository.findSelectedForOrder(buyer)).isNotEmpty(); // 주문이 장바구니를 읽은 시점
+            ExecutorService other = Executors.newSingleThreadExecutor();
+            try {
+                other.submit(change).get(30, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            } finally {
+                other.shutdown();
+            }
+            orderService.create(buyer, ADDRESS); // 같은 트랜잭션에 합류 → 위에서 읽은 값으로 주문을 진행한다
+        });
+    }
 
     private String orderOutcome(long buyer) {
         try {

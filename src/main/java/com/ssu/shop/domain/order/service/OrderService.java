@@ -90,8 +90,13 @@ public class OrderService {
 
         stockService.decrease(orderItems); // 재고가 모자라면 OUT_OF_STOCK → 위에서 저장한 것까지 전부 롤백
 
-        // 같은 회원이 주문 버튼을 두 번 눌러 두 요청이 같은 장바구니를 읽었다면, 늦은 쪽은 지울 항목이 이미 없다 → 중복 주문을 막는다
-        int deleted = cartItemRepository.deleteByIds(cartItems.stream().map(CartItem::getId).toList());
+        // 주문할 때 읽은 그대로인 항목만 지운다. 하나라도 안 지워지면 그 사이 장바구니가 바뀐 것이다:
+        //  - 같은 회원이 주문 버튼을 두 번 눌렀다 → 먼저 끝난 주문이 이미 지움 (중복 주문 방지)
+        //  - 주문하는 사이 수량을 바꾸거나 체크를 풀었다 → 사용자가 본 것과 다른 주문이 되지 않게 막는다
+        int deleted = 0;
+        for (CartItem cartItem : cartItems) {
+            deleted += cartItemRepository.deleteIfUnchanged(cartItem.getId(), cartItem.getQuantity());
+        }
         if (deleted != cartItems.size()) {
             throw new BusinessException(ErrorCode.DATA_CONFLICT, "장바구니가 변경되었습니다. 다시 확인하고 주문해 주세요.");
         }
