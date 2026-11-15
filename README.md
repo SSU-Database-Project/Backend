@@ -176,6 +176,8 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
 
 - 단위·보안 테스트는 DB 없이 실행됩니다.
 - **DB 테스트**는 `DB_TEST_URL`이 있을 때만 실행됩니다: DB 제약 검증 18개(`SchemaConstraintTest`), 통계 SQL 7개(`StatsQueryTest`: 취소 제외, 주·월 묶음, 자정 경계), 같은 이메일 동시 가입 10건(`ConcurrentSignupTest`).
+  - BE-2 추가: 재고 변경·동시성·롤백 7개(`StockServiceDbTest`), 장바구니·판매자 재고 API 11개(`CartStockApiDbTest`), 주문 생성·동시성·장바구니 변경 충돌 7개(`OrderCreateDbTest`), 주문 조회·취소·구매확정·판매자 배송 관리 7개(`OrderManageDbTest`).
+- 현재 테스트는 메서드 기준 총 **141개**(단위·보안 **83개**, DB **58개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
 
 ```powershell
 # PowerShell (Docker DB 기준. 직접 설치한 MySQL이면 3307)
@@ -211,9 +213,9 @@ com.ssu.shop
     ├── product   상품·옵션 등록·수정·삭제·조회, 관리자 승인·거절·차단                  (BE-1)
     ├── like      좋아요 추가·취소·내 목록                                             (BE-1)
     ├── stats     판매 통계: 판매자 일/주/월·상품 순위·대시보드, 관리자 전체                 (BE-1)
-    ├── inventory 재고 이력 엔티티 (재고 로직은 BE-2)
-    ├── cart      엔티티 골격 (BE-2)
-    └── order     주문·판매자별 배송·주문 상품 엔티티 골격 (BE-2)
+    ├── inventory 재고 차감·복원·입고·조정과 이력, 판매자 재고 API (BE-2)
+    ├── cart      장바구니 조회·담기·수량·체크 변경·삭제 (BE-2)
+    └── order     주문 생성·조회·취소·구매확정, 판매자별 배송 조회·상태 변경 (BE-2)
 ```
 
 ```
