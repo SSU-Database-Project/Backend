@@ -36,12 +36,15 @@ public class CartService {
     /** 담기. 구매자에게 보이는 상품(판매중·품절)의 옵션만 담을 수 있다. */
     @Transactional
     public CartResponse add(Long userId, CartItemAddRequest request) {
+        // 장바구니 만들기를 트랜잭션의 맨 처음에 한다. MySQL 은 트랜잭션 안의 첫 일반 SELECT 시점의 모습을 계속 보여 주므로,
+        // 옵션을 먼저 조회하면 그 뒤에 다른 요청이 만든 장바구니가 보이지 않는다 (처음 담기를 동시에 두 번 보내면 실패하던 원인).
+        // INSERT IGNORE 는 다른 요청이 만들고 있으면 그 커밋을 기다리므로, 이 뒤의 첫 SELECT 에는 장바구니가 반드시 보인다.
+        cartRepository.createIfAbsent(userId);
         ProductOption option = optionRepository.findById(request.optionId())
                 .orElseThrow(() -> BusinessException.notFound("상품 옵션"));
         if (!option.getProduct().getStatus().isPublic()) {
-            throw BusinessException.notFound("상품 옵션"); // 구매자에게 안 보이는 상품은 없는 것처럼
+            throw BusinessException.notFound("상품 옵션"); // 구매자에게 안 보이는 상품은 없는 것처럼 (만든 장바구니도 롤백)
         }
-        cartRepository.createIfAbsent(userId);
         Long cartId = cartRepository.findIdByUserId(userId).orElseThrow();
         cartItemRepository.addOrIncrease(cartId, request.optionId(), request.quantity());
         if (cartItemRepository.findQuantity(cartId, request.optionId()) > CartDtos.MAX_QUANTITY) {

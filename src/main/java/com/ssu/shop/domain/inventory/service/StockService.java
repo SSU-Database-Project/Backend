@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 트랜잭션: 호출한 쪽의 트랜잭션에 합류한다(없으면 새로 시작). 잠금은 그 트랜잭션이 끝날 때 풀린다.
  *
  * 호출하는 쪽(주문 서비스)이 지킬 약속 — 정합성 검사 "주문 줄마다 ORDER 이력 1건, 취소된 배송의 줄마다 CANCEL 이력 1건" 기준:
+ *  - 주문 생성은 주문 줄(order_items)을 저장하기 전에 lock 으로 옵션을 먼저 잠근다 (이유는 lock 주석. 안 지키면 동시 주문끼리 데드락).
  *  - decrease 는 주문 줄 하나에 한 번만, 주문을 저장하는 것과 같은 트랜잭션에서 부른다.
  *  - restore 는 배송 묶음을 CANCELED 로 바꾸는 것과 같은 트랜잭션에서, 그 묶음의 모든 줄에 대해 한 번만 부른다.
  *  - 넘기는 OrderItem 은 이미 저장되어 id 가 있어야 한다 (이력이 order_item_id 로 참조한다).
@@ -72,6 +73,7 @@ public class StockService {
         Map<Long, ProductOption> options = lockOptions(optionIdsOf(orderItems));
         for (OrderItem item : orderItems) {
             ProductOption option = options.get(item.getOption().getId());
+            checkMax(option, item.getQuantity());
             int after = option.changeStock(item.getQuantity());
             stockHistoryRepository.save(StockHistory.cancel(option, item.getQuantity(), after, item));
         }
@@ -83,6 +85,7 @@ public class StockService {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "입고 수량은 1 이상이어야 합니다.");
         }
         ProductOption option = lockOption(optionId);
+        checkMax(option, quantity);
         int after = option.changeStock(quantity);
         stockHistoryRepository.save(StockHistory.inbound(option, quantity, after, memo));
     }
@@ -93,11 +96,23 @@ public class StockService {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "조정 수량은 0일 수 없습니다.");
         }
         ProductOption option = lockOption(optionId);
-        if (option.getStockQuantity() + changeQty < 0) {
+        if ((long) option.getStockQuantity() + changeQty < 0) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "조정 후 재고는 0보다 작을 수 없습니다.");
         }
+        checkMax(option, changeQty);
         int after = option.changeStock(changeQty);
         stockHistoryRepository.save(StockHistory.adjust(option, changeQty, after, memo));
+    }
+
+    /**
+     * 재고는 int(DB 는 INT)라서 2,147,483,647 을 넘을 수 없다. 그대로 더하면 음수로 바뀌어 DB CHECK 오류(DATA_CONFLICT)로 끝나
+     * 원인을 알기 어려우므로, 그 전에 long 으로 계산해 무엇이 문제인지 알려 주는 에러로 거부한다.
+     */
+    private static void checkMax(ProductOption option, int delta) {
+        if ((long) option.getStockQuantity() + delta > Integer.MAX_VALUE) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT,
+                    "옵션 재고는 최대 " + Integer.MAX_VALUE + "개까지 둘 수 있습니다.");
+        }
     }
 
     private ProductOption lockOption(Long optionId) {

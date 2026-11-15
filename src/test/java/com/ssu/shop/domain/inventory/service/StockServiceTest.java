@@ -154,6 +154,51 @@ class StockServiceTest {
         verifyNoInteractions(optionRepository, stockHistoryRepository);
     }
 
+    // ===== 재고 상한 (int 넘침) =====
+
+    @Test
+    void 입고로_재고가_int_최대를_넘으면_INVALID_INPUT_이고_재고와_이력은_그대로다() {
+        ProductOption option = lockedOption(1L, 1);
+
+        assertThatThrownBy(() -> stockService.inbound(1L, Integer.MAX_VALUE, null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+
+        assertThat(option.getStockQuantity()).isEqualTo(1); // 음수로 넘치지 않았다
+        verify(stockHistoryRepository, never()).save(any());
+    }
+
+    @Test
+    void 취소_복원으로_int_최대를_넘어도_INVALID_INPUT() {
+        ProductOption option = lockedOption(1L, Integer.MAX_VALUE);
+
+        assertThatThrownBy(() -> stockService.restore(List.of(orderItem(100L, option, 1))))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+        assertThat(option.getStockQuantity()).isEqualTo(Integer.MAX_VALUE);
+    }
+
+    @Test
+    void 조정은_int_최대까지는_되고_넘으면_INVALID_INPUT() {
+        ProductOption option = lockedOption(1L, Integer.MAX_VALUE - 1);
+
+        stockService.adjust(1L, 1, null); // 정확히 최대값까지는 허용
+        assertThat(option.getStockQuantity()).isEqualTo(Integer.MAX_VALUE);
+
+        assertThatThrownBy(() -> stockService.adjust(1L, 1, null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+        assertThat(option.getStockQuantity()).isEqualTo(Integer.MAX_VALUE);
+    }
+
+    @Test
+    void 엔티티의_재고_변경도_넘치면_음수가_되지_않고_예외가_난다() {
+        ProductOption option = option(1L, Integer.MAX_VALUE);
+
+        assertThatThrownBy(() -> option.changeStock(1)).isInstanceOf(ArithmeticException.class);
+        assertThat(option.getStockQuantity()).isEqualTo(Integer.MAX_VALUE);
+    }
+
     // ===== helpers =====
 
     private ProductOption option(long id, int stock) {
