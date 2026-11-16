@@ -16,7 +16,7 @@ public final class CartDtos {
     /** 한 옵션을 담을 수 있는 최대 수량 */
     public static final int MAX_QUANTITY = 99;
 
-    /** 담기. 이미 담긴 옵션이면 수량만 늘어난다 (합쳐서 99 를 넘으면 거부). 재고보다 많이 담는 것은 허용한다. */
+    /** 담기. 이미 담긴 옵션이면 수량이 늘고 다시 체크된다 (합쳐서 99 를 넘으면 거부). 재고보다 많이 담는 것은 허용한다. */
     public record CartItemAddRequest(
             @NotNull Long optionId,
             @NotNull @Min(1) @Max(MAX_QUANTITY) Integer quantity) {

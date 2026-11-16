@@ -37,8 +37,9 @@ public class CartController {
         return ApiResponse.success(cartService.getCart(loginUser.id()));
     }
 
-    @Operation(summary = "옵션 담기 (같은 옵션이면 수량만 증가)",
-            description = "quantity 1~99. 이미 담긴 옵션이면 수량을 더하고, 합쳐서 99 를 넘으면 INVALID_INPUT(400). "
+    @Operation(summary = "옵션 담기 (같은 옵션이면 줄은 그대로, 수량 증가)",
+            description = "quantity 1~99. 이미 담긴 옵션이면 수량을 더하고 체크가 풀려 있었으면 다시 체크한다. "
+                    + "합쳐서 99 를 넘으면 INVALID_INPUT(400). "
                     + "재고보다 많이 담을 수 있다. 없는 옵션이거나 구매자에게 보이지 않는 상품이면 NOT_FOUND(404)")
     @PostMapping("/items")
     public ApiResponse<CartResponse> add(@AuthenticationPrincipal LoginUser loginUser,

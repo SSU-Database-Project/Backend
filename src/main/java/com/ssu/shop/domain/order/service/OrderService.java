@@ -18,6 +18,8 @@ import com.ssu.shop.domain.user.repository.UserRepository;
 import com.ssu.shop.global.common.PageResponse;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -25,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -43,6 +46,7 @@ public class OrderService {
     private final OrderItemRepository orderItemRepository;
     private final UserRepository userRepository;
     private final StockService stockService;
+    private final EntityManager entityManager;
     private final Clock clock;
 
     /**
@@ -51,11 +55,16 @@ public class OrderService {
      *
      * 순서
      *  1) 체크한 장바구니 항목 조회 (쿼리 1번)
-     *  2) 옵션 행 잠금 — 주문 줄을 저장하기 전에 (이유는 StockService.lock 주석)
-     *  3) 판매중이 아닌 상품이 섞여 있으면 주문 전체 거부
-     *  4) 주문 1건 + 판매자마다 배송 묶음 1개 + 주문 줄 저장 (주문과 배송 묶음의 생성 시각은 같은 값)
-     *  5) 재고 차감 + 재고 이력 (주문 줄마다 한 번)
-     *  6) 주문한 장바구니 항목 삭제
+     *  2) 상품 행 잠금 + 최신 값으로 다시 읽기 (이유는 lockProducts 주석)
+     *  3) 옵션 행 잠금 — 주문 줄을 저장하기 전에 (이유는 StockService.lock 주석)
+     *  4) 판매중이 아닌 상품이 섞여 있으면 주문 전체 거부 — 2) 에서 다시 읽은 상태로 검사한다
+     *  5) 주문 1건 + 판매자마다 배송 묶음 1개 + 주문 줄 저장 (주문과 배송 묶음의 생성 시각은 같은 값).
+     *     주문 줄에 복사하는 상품명·단가와 주문 총액도 2) 에서 다시 읽은 값이다
+     *  6) 재고 차감 + 재고 이력 (주문 줄마다 한 번)
+     *  7) 주문한 장바구니 항목 삭제
+     *
+     * 잠그는 순서는 항상 상품(id 오름차순) → 옵션(id 오름차순)이다. 이 순서를 바꾸면 주문끼리, 또는 주문과 상품 변경이
+     * 서로를 기다리다 멈출 수 있다.
      */
     @Transactional
     public OrderResponse create(Long userId, OrderCreateRequest request) {
@@ -63,6 +72,7 @@ public class OrderService {
         if (cartItems.isEmpty()) {
             throw new BusinessException(ErrorCode.NO_ORDER_ITEMS);
         }
+        lockProducts(cartItems);
         stockService.lock(cartItems.stream().map(item -> item.getOption().getId()).toList());
 
         long totalPrice = 0;
@@ -168,5 +178,25 @@ public class OrderService {
     /** DB 의 DATETIME(6) 에 맞춰 마이크로초까지만 남긴다 */
     private LocalDateTime now() {
         return LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /**
+     * 주문할 상품 행을 id 오름차순으로 잠그고(공유 잠금, FOR SHARE), 잠근 상태에서 DB 의 최신 값으로 다시 읽는다.
+     *
+     * 다시 읽는 이유: MySQL 은 일반 SELECT 에 "트랜잭션이 처음 읽은 시점"의 값을 계속 보여 준다. 장바구니를 읽을 때 함께 읽은
+     * 상품 상태·이름·가격은 그 시점의 값이라, 이 주문이 잠금을 기다리는 사이 판매자가 품절·삭제·수정(→ 재승인 대기)을 커밋해도
+     * 바뀌기 전 값으로 보인다. 잠금 조회만 가장 최근에 커밋된 값을 보여 주고, refresh 가 그 값으로 메모리의 상품을 덮어쓴다.
+     * 잠그는 이유: 이 주문이 커밋될 때까지 판매자·관리자가 상품을 바꾸지 못하고 기다리게 한다 → 검사한 상태 그대로 주문이 끝난다.
+     * 공유 잠금이라 같은 상품을 주문하는 다른 주문은 여기서 기다리지 않는다 (줄을 서는 곳은 옵션 잠금).
+     * id 오름차순인 이유: 주문 하나가 상품 여러 개를 잠그므로, 순서가 주문마다 다르면 상품 변경과 얽혀 서로를 기다릴 수 있다.
+     */
+    private void lockProducts(List<CartItem> cartItems) {
+        Map<Long, Product> products = new TreeMap<>();
+        for (CartItem cartItem : cartItems) {
+            Product product = cartItem.getOption().getProduct();
+            products.put(product.getId(), product);
+        }
+        // 상품마다 SELECT 1번. 주문당 상품은 몇 개라 충분하다
+        products.values().forEach(product -> entityManager.refresh(product, LockModeType.PESSIMISTIC_READ));
     }
 }
