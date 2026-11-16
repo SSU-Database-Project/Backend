@@ -5,7 +5,9 @@ import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
 import com.ssu.shop.domain.product.entity.Product;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDateTime;
@@ -101,6 +103,38 @@ public final class OrderDtos {
                     order.getReceiverName(), order.getReceiverPhone(), order.getZipCode(), order.getAddress(),
                     order.getAddressDetail(),
                     shipments.values().stream().map(s -> ShipmentResponse.of(s, byShipment.get(s.getId()))).toList());
+        }
+    }
+
+    /** 판매자의 배송 상태 변경 요청. 한 칸씩 앞으로만: PREPARING(배송준비) → SHIPPING(배송중) → DELIVERED(배송완료) */
+    public record ShipmentStatusRequest(
+            @NotNull @Schema(allowableValues = {"PREPARING", "SHIPPING", "DELIVERED"}) ShipmentStatus status) {
+    }
+
+    /** 판매자가 보는 배송 묶음 한 건: 내 상품의 주문 줄과 배송지. subtotal 은 이 묶음의 줄 합계. */
+    public record SellerShipmentResponse(
+            Long shipmentId,
+            Long orderId,
+            ShipmentStatus status,
+            LocalDateTime orderedAt,
+            LocalDateTime confirmedAt,
+            LocalDateTime canceledAt,
+            long subtotal,
+            String receiverName,
+            String receiverPhone,
+            String zipCode,
+            String address,
+            String addressDetail,
+            List<OrderItemResponse> items) {
+
+        /** shipment 의 주문(order)과 items 의 옵션·상품이 이미 로딩되어 있어야 한다 */
+        public static SellerShipmentResponse of(Shipment shipment, List<OrderItem> items) {
+            Order order = shipment.getOrder();
+            return new SellerShipmentResponse(shipment.getId(), order.getId(), shipment.getStatus(),
+                    shipment.getCreatedAt(), shipment.getConfirmedAt(), shipment.getCanceledAt(),
+                    items.stream().mapToLong(OrderItem::lineTotal).sum(),
+                    order.getReceiverName(), order.getReceiverPhone(), order.getZipCode(), order.getAddress(),
+                    order.getAddressDetail(), items.stream().map(OrderItemResponse::from).toList());
         }
     }
 }
