@@ -130,6 +130,24 @@ class CartStockApiDbTest {
         assertThat(cart.items().get(0).quantity()).isEqualTo(5);
     }
 
+    /** 체크를 풀어 둔 옵션을 다시 담았는데 체크가 풀린 채로 남으면, 방금 담은 상품이 합계와 주문에서 빠진다 */
+    @Test
+    void 체크를_푼_항목을_다시_담으면_수량이_늘고_다시_체크되어_합계에_포함된다() {
+        long itemId = cartService.add(buyer, new CartItemAddRequest(teeBlack, 1)).items().get(0).cartItemId();
+        CartResponse unchecked = cartService.update(buyer, itemId, new CartItemUpdateRequest(null, false));
+        assertThat(unchecked.totalPrice()).isZero();
+
+        CartResponse cart = cartService.add(buyer, new CartItemAddRequest(teeBlack, 2));
+
+        assertThat(cart.items()).hasSize(1);
+        assertThat(cart.items().get(0).quantity()).isEqualTo(3);
+        assertThat(cart.items().get(0).selected()).isTrue();
+        assertThat(cart.selectedCount()).isEqualTo(1);
+        assertThat(cart.totalPrice()).isEqualTo(30_000L); // 10,000원 × 3
+        // 응답만이 아니라 DB 에도 체크가 남는다
+        assertThat(jdbc.queryForObject("SELECT selected FROM cart_items WHERE id = ?", Boolean.class, itemId)).isTrue();
+    }
+
     @Test
     void 재고보다_많이_담을_수_있지만_합쳐서_99를_넘으면_거부하고_수량은_그대로다() {
         cartService.add(buyer, new CartItemAddRequest(teeBlack, 50)); // 재고는 5
