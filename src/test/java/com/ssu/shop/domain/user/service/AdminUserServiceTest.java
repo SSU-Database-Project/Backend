@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,9 +17,11 @@ import com.ssu.shop.domain.user.entity.UserStatus;
 import com.ssu.shop.domain.user.repository.UserRepository;
 import com.ssu.shop.global.error.ErrorCode;
 import com.ssu.shop.support.Fixtures;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -51,19 +54,26 @@ class AdminUserServiceTest {
         assertThat(buyer.getEmail()).isEqualTo("withdrawn_5@withdrawn.local");
         assertThat(buyer.getName()).isEqualTo("탈퇴회원");
         assertThat(buyer.getPhone()).isNull();
-        verify(productRepository, never()).deleteAllBySeller(anyLong());
+        verify(productRepository, never()).findActiveIdsBySeller(anyLong());
+        verify(productRepository, never()).markDeleted(anyLong());
     }
 
     @Test
-    void 판매자가_탈퇴하면_그_판매자의_상품을_판매_종료한다() {
+    void 판매자가_탈퇴하면_상품을_id_오름차순으로_한_행씩_판매_종료하고_계정도_탈퇴된다() {
         User sellerUser = Fixtures.user(6L, "seller@test.com", Role.SELLER);
         when(userRepository.findById(6L)).thenReturn(Optional.of(sellerUser));
         when(sellerRepository.findByUserId(6L)).thenReturn(Optional.of(Fixtures.seller(60L, sellerUser)));
+        when(productRepository.findActiveIdsBySeller(60L)).thenReturn(List.of(3L, 8L, 21L));
         when(passwordEncoder.encode(anyString())).thenReturn("{bcrypt}random");
 
         adminUserService.withdraw(6L);
 
-        verify(productRepository).deleteAllBySeller(60L);
+        // 주문(OrderService.create)과 같은 순서로 잠가야 데드락이 없다
+        InOrder inOrder = inOrder(productRepository);
+        inOrder.verify(productRepository).markDeleted(3L);
+        inOrder.verify(productRepository).markDeleted(8L);
+        inOrder.verify(productRepository).markDeleted(21L);
+        assertThat(sellerUser.getStatus()).isEqualTo(UserStatus.WITHDRAWN);
     }
 
     @Test
