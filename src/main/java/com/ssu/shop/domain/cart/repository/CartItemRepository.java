@@ -56,14 +56,15 @@ public interface CartItemRepository extends JpaRepository<CartItem, Long> {
     Optional<CartItem> findByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);
 
     /**
-     * 담기: 처음 담는 옵션이면 새 줄, 이미 담긴 옵션이면 수량만 더한다 (uk_cart_items_cart_option).
+     * 담기: 처음 담는 옵션이면 새 줄, 이미 담긴 옵션이면 수량을 더하고 다시 체크한다 (uk_cart_items_cart_option).
      * 한 문장이라 같은 옵션을 동시에 두 번 눌러도 줄이 둘로 나뉘거나 수량이 빠지지 않는다.
+     * 다시 체크하는 이유: 체크를 풀어 둔 옵션을 다시 담았는데 풀린 채로 두면, 방금 담은 상품이 합계와 주문에서 빠진다.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(nativeQuery = true, value = """
             INSERT INTO cart_items (cart_id, option_id, quantity)
             VALUES (:cartId, :optionId, :quantity)
-            ON DUPLICATE KEY UPDATE quantity = quantity + :quantity
+            ON DUPLICATE KEY UPDATE quantity = quantity + :quantity, selected = TRUE
             """)
     void addOrIncrease(@Param("cartId") Long cartId, @Param("optionId") Long optionId,
                        @Param("quantity") int quantity);
