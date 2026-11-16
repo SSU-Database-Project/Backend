@@ -176,8 +176,8 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
 
 - 단위·보안 테스트는 DB 없이 실행됩니다.
 - **DB 테스트**는 `DB_TEST_URL`이 있을 때만 실행됩니다: DB 제약 검증 18개(`SchemaConstraintTest`), 통계 SQL 7개(`StatsQueryTest`: 취소 제외, 주·월 묶음, 자정 경계), 같은 이메일 동시 가입 10건(`ConcurrentSignupTest`).
-  - BE-2 추가: 재고 변경·동시성·롤백 7개(`StockServiceDbTest`), 장바구니·판매자 재고 API 11개(`CartStockApiDbTest`), 주문 생성·동시성·장바구니 변경 충돌 7개(`OrderCreateDbTest`), 주문 조회·취소·구매확정·판매자 배송 관리 7개(`OrderManageDbTest`).
-- 현재 테스트는 메서드 기준 총 **141개**(단위·보안 **83개**, DB **58개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
+  - BE-2 추가: 재고 변경·동시성·롤백 7개(`StockServiceDbTest`), 장바구니·판매자 재고 API 12개(`CartStockApiDbTest`), 주문 생성·동시성·장바구니 변경 충돌·판매자 상품 변경과의 경합 13개(`OrderCreateDbTest`), 주문 조회·취소·구매확정·판매자 배송 관리 7개(`OrderManageDbTest`).
+- 현재 테스트는 메서드 기준 총 **152개**(단위·보안 **87개**, DB **65개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
 
 ```powershell
 # PowerShell (Docker DB 기준. 직접 설치한 MySQL이면 3307)
