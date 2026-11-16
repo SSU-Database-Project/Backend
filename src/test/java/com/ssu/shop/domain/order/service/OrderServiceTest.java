@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -37,6 +38,8 @@ import com.ssu.shop.domain.user.repository.UserRepository;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
 import com.ssu.shop.support.Fixtures;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -75,6 +78,8 @@ class OrderServiceTest {
     UserRepository userRepository;
     @Mock
     StockService stockService;
+    @Mock
+    EntityManager entityManager;
 
     OrderService orderService;
 
@@ -86,7 +91,7 @@ class OrderServiceTest {
     @BeforeEach
     void setUp() {
         orderService = new OrderService(cartItemRepository, orderRepository, shipmentRepository, orderItemRepository,
-                userRepository, stockService, CLOCK);
+                userRepository, stockService, entityManager, CLOCK);
         sellerA = Fixtures.seller(1L, Fixtures.user(1L, "a@test.com"));
         sellerB = Fixtures.seller(2L, Fixtures.user(2L, "b@test.com"));
         leaf = Fixtures.leafCategory(11L, Fixtures.rootCategory(1L, SizeGroup.CLOTHING));
@@ -145,6 +150,57 @@ class OrderServiceTest {
     }
 
     @Test
+    void 상품을_id_순서로_잠근_뒤에_옵션을_잠근다() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
+        CartItem cap = cartItem(sellerB, "모자", 19_000, ProductStatus.ON_SALE, 1);
+        CartItem teeAgain = cartItemOf(tee.getOption().getProduct(), 1); // 같은 상품의 다른 옵션
+        // 장바구니에는 id 가 큰 상품이 먼저 담겨 있다
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(cap, tee, teeAgain));
+
+        orderService.create(BUYER, REQUEST);
+
+        InOrder order = inOrder(entityManager, stockService);
+        order.verify(entityManager).refresh(tee.getOption().getProduct(), LockModeType.PESSIMISTIC_READ); // 상품마다 한 번
+        order.verify(entityManager).refresh(cap.getOption().getProduct(), LockModeType.PESSIMISTIC_READ);
+        order.verify(stockService).lock(anyList());
+        verify(entityManager, org.mockito.Mockito.times(2)).refresh(any(Product.class), any(LockModeType.class));
+    }
+
+    @Test
+    void 판매_상태는_상품을_잠근_뒤_다시_읽은_값으로_검사한다() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee));
+        // 장바구니를 읽은 뒤 판매자가 품절 처리했고, 잠금 조회가 그 값을 가져온 상황
+        doAnswer(inv -> {
+            Product locked = inv.getArgument(0);
+            ReflectionTestUtils.setField(locked, "status", ProductStatus.SOLD_OUT);
+            return null;
+        }).when(entityManager).refresh(any(Product.class), any(LockModeType.class));
+
+        assertError(ErrorCode.PRODUCT_NOT_PURCHASABLE, () -> orderService.create(BUYER, REQUEST));
+        verify(orderRepository, never()).save(any());
+        verify(stockService, never()).decrease(any());
+    }
+
+    @Test
+    void 주문_줄의_상품명과_단가와_주문_총액은_상품을_잠근_뒤_다시_읽은_값이다() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 2);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee));
+        doAnswer(inv -> {
+            Product locked = inv.getArgument(0);
+            ReflectionTestUtils.setField(locked, "name", "새 이름 티셔츠");
+            ReflectionTestUtils.setField(locked, "price", 12_000);
+            return null;
+        }).when(entityManager).refresh(any(Product.class), any(LockModeType.class));
+
+        OrderResponse order = orderService.create(BUYER, REQUEST);
+
+        assertThat(order.totalPrice()).isEqualTo(24_000);
+        assertThat(order.shipments().get(0).items()).extracting("productName", "unitPrice")
+                .containsExactly(org.assertj.core.api.Assertions.tuple("새 이름 티셔츠", 12_000));
+    }
+
+    @Test
     void 체크한_항목이_없으면_NO_ORDER_ITEMS() {
         when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of());
 
@@ -188,6 +244,10 @@ class OrderServiceTest {
         Product product = Fixtures.product(ids.getAndIncrement(), brand, leaf, status);
         ReflectionTestUtils.setField(product, "name", productName);
         ReflectionTestUtils.setField(product, "price", price);
+        return cartItemOf(product, quantity);
+    }
+
+    private CartItem cartItemOf(Product product, int quantity) {
         ProductOption option = withId(ProductOption.create(product, Fixtures.color(1L, "블랙"),
                 Fixtures.size(3L, SizeGroup.CLOTHING, "M"), 100));
         return withId(CartItem.create(null, option, quantity));

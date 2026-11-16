@@ -15,6 +15,11 @@ import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
 import com.ssu.shop.domain.order.service.OrderService;
+import com.ssu.shop.domain.product.dto.ProductDtos.AdminProductStatusRequest;
+import com.ssu.shop.domain.product.dto.ProductDtos.OptionRequest;
+import com.ssu.shop.domain.product.dto.ProductDtos.ProductUpdateRequest;
+import com.ssu.shop.domain.product.entity.ProductStatus;
+import com.ssu.shop.domain.product.service.ProductService;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
 import com.ssu.shop.support.DbFixtures;
@@ -29,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,6 +97,8 @@ class OrderCreateDbTest {
     @Autowired
     CartService cartService;
     @Autowired
+    ProductService productService;
+    @Autowired
     JdbcTemplate jdbc;
     @Autowired
     CartItemRepository cartItemRepository;
@@ -99,6 +107,7 @@ class OrderCreateDbTest {
 
     DbFixtures db;
 
+    long sellerUserA;
     long sellerA;
     long sellerB;
     long tee;       // 판매자 A, 10,000원
@@ -111,7 +120,8 @@ class OrderCreateDbTest {
     void setUp() {
         db = new DbFixtures(jdbc, "order-test");
         db.cleanUp();
-        sellerA = db.seller(db.user("seller-a", "SELLER"), "7770000001");
+        sellerUserA = db.user("seller-a", "SELLER");
+        sellerA = db.seller(sellerUserA, "7770000001");
         sellerB = db.seller(db.user("seller-b", "SELLER"), "7770000002");
         tee = db.product(db.brand(sellerA, "A"), "TEE", 10_000, "ON_SALE");
         teeBlack = db.option(tee, BLACK, 10);
@@ -241,6 +251,168 @@ class OrderCreateDbTest {
         assertThat(stockOf(teeBlack)).isEqualTo(7);
     }
 
+    // ===== 주문과 판매자의 상품 변경이 겹칠 때 =====
+
+    /**
+     * 주문이 장바구니를 읽은 뒤 잠금을 잡기 전에(= 잠금을 기다리는 사이에) 판매자의 변경이 커밋된 경우.
+     * MySQL 은 일반 SELECT 에 트랜잭션이 처음 읽은 시점의 값을 계속 보여 주므로, 처음 읽어 둔 상품 상태로 검사하면
+     * 이미 품절·삭제·수정된 상품이 바뀌기 전 상태와 가격으로 주문된다 → 상품을 잠근 뒤 다시 읽은 값으로 검사해야 한다.
+     * 순서 고정은 위 테스트와 같다: 바깥 트랜잭션에서 장바구니를 먼저 읽고 → 다른 스레드가 판매자의 변경을 커밋 → 같은 트랜잭션에서 주문.
+     */
+    @Test
+    void 주문이_잠금을_기다리는_사이_판매자가_품절_처리하면_주문을_거부하고_아무것도_바뀌지_않는다() {
+        long buyer = buyerWithTeeAndCap();
+
+        assertError(ErrorCode.PRODUCT_NOT_PURCHASABLE, () -> orderAfterConcurrentChange(buyer,
+                () -> productService.changeSaleStatus(sellerUserA, tee, ProductStatus.SOLD_OUT)));
+
+        assertThat(statusOf(tee)).isEqualTo("SOLD_OUT");
+        assertNothingOrdered(buyer, 2);
+    }
+
+    @Test
+    void 주문이_잠금을_기다리는_사이_판매자가_상품을_삭제하면_주문을_거부하고_아무것도_바뀌지_않는다() {
+        long buyer = buyerWithTeeAndCap();
+
+        assertError(ErrorCode.PRODUCT_NOT_PURCHASABLE, () -> orderAfterConcurrentChange(buyer,
+                () -> productService.delete(sellerUserA, tee)));
+
+        assertThat(statusOf(tee)).isEqualTo("DELETED");
+        assertNothingOrdered(buyer, 2);
+    }
+
+    @Test
+    void 주문이_잠금을_기다리는_사이_판매자가_가격을_수정하면_재승인_대기라_주문을_거부하고_아무것도_바뀌지_않는다() {
+        long buyer = buyerWithTeeAndCap();
+
+        assertError(ErrorCode.PRODUCT_NOT_PURCHASABLE, () -> orderAfterConcurrentChange(buyer,
+                () -> productService.update(sellerUserA, tee, priceAndName(12_000, null))));
+
+        assertThat(statusOf(tee)).isEqualTo("PENDING");
+        assertNothingOrdered(buyer, 2);
+    }
+
+    /** 상태뿐 아니라 주문 줄에 복사하는 상품명·단가와 주문 총액도 잠근 뒤 읽은 값이어야 한다 */
+    @Test
+    void 주문이_잠금을_기다리는_사이_가격_수정과_재승인이_끝났으면_바뀐_이름과_가격으로_주문된다() {
+        long buyer = buyerWithTeeAndCap(); // tee 2개 + cap 1개
+
+        OrderResponse order = orderAfterConcurrentChange(buyer, () -> {
+            productService.update(sellerUserA, tee, priceAndName(12_000, "새 이름 티셔츠"));
+            productService.adminChangeStatus(tee, new AdminProductStatusRequest(ProductStatus.ON_SALE, null));
+        });
+
+        assertThat(order.totalPrice()).isEqualTo(12_000 * 2 + 19_000);
+        assertThat(order.shipments().get(0).items()).extracting("productName", "unitPrice", "lineTotal")
+                .containsExactly(tuple("새 이름 티셔츠", 12_000, 24_000L));
+        assertThat(count("SELECT total_price FROM orders WHERE id = " + order.orderId())).isEqualTo(43_000);
+        assertThat(count("SELECT COUNT(*) FROM order_items WHERE option_id = %d AND unit_price = 12000"
+                .formatted(teeBlack) + " AND product_name = '새 이름 티셔츠'")).isEqualTo(1);
+        assertIntegrity();
+    }
+
+    /**
+     * 반대 순서: 주문이 먼저 상품을 잡았으면, 판매자의 변경은 주문이 끝날 때까지 기다렸다가 그 뒤에 처리된다.
+     * (주문이 검사한 상태가 주문이 커밋될 때까지 바뀌지 않는다.)
+     */
+    @Test
+    void 주문이_끝나기_전에는_판매자의_상품_변경이_기다렸다가_주문_뒤에_처리된다() throws Exception {
+        long buyer = db.user("buyer", "USER");
+        cartService.add(buyer, new CartItemAddRequest(teeBlack, 1));
+        ExecutorService seller = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> change = new TransactionTemplate(txManager).execute(status -> {
+                orderService.create(buyer, ADDRESS); // 아직 커밋 전 — 이 주문이 상품을 잡고 있다
+                Future<?> waiting = seller.submit(
+                        () -> productService.changeSaleStatus(sellerUserA, tee, ProductStatus.SOLD_OUT));
+                assertThatThrownBy(() -> waiting.get(1, TimeUnit.SECONDS)).isInstanceOf(TimeoutException.class);
+                return waiting;
+            });
+            change.get(30, TimeUnit.SECONDS); // 주문이 커밋되면 이어서 처리된다
+        } finally {
+            seller.shutdownNow();
+        }
+
+        assertThat(count("SELECT COUNT(*) FROM orders WHERE user_id = " + buyer)).isEqualTo(1);
+        assertThat(stockOf(teeBlack)).isEqualTo(9);
+        assertThat(statusOf(tee)).isEqualTo("SOLD_OUT");
+        assertIntegrity();
+    }
+
+    /**
+     * 주문(상품 여러 개를 잠근 뒤 옵션을 잠금)과 판매자·관리자의 상품 변경(상품 하나만 잠금)이 한꺼번에 몰려도
+     * 서로를 기다리다 멈추지 않고 하나씩 처리되는지 확인한다. 타이밍 문제라 회원과 가격을 바꿔 가며 반복한다.
+     * 데드락이나 잠금 대기 초과가 나면 결과에 OK / PRODUCT_NOT_PURCHASABLE 이 아닌 값(예외 이름)이 섞인다.
+     * 장바구니에는 상품 id 순서와 다르게 담는다 — 주문이 담은 순서가 아니라 상품 id 순서로 잠그는지도 함께 걸린다.
+     */
+    @Test
+    void 주문과_판매자의_상품_변경이_동시에_와도_데드락_없이_하나씩_처리된다() throws Exception {
+        int rounds = 10;
+        int buyersPerRound = 3;
+        long shirt = db.product(brandOf(tee), "RACE-SHIRT", 10_000, "ON_SALE");  // 판매자 A
+        long shirtBlack = db.option(shirt, BLACK, 1_000);
+        long coat = db.product(brandOf(tee), "RACE-COAT", 20_000, "ON_SALE");    // 판매자 A
+        long coatBlack = db.option(coat, BLACK, 1_000);
+        long bag = db.product(brandOf(cap), "RACE-BAG", 30_000, "ON_SALE");      // 판매자 B
+        long bagBlack = db.option(bag, BLACK, 1_000);
+        int ordered = 0;
+
+        for (int round = 0; round < rounds; round++) {
+            jdbc.update("UPDATE products SET status = 'ON_SALE' WHERE id IN (?, ?, ?)", shirt, coat, bag);
+            int oldPrice = 10_000 + round;
+            int newPrice = oldPrice + 1;
+            long newColor = 3 + round; // 블랙(1)·화이트(2) 다음 색상부터 하나씩 옵션 추가
+            List<Long> buyers = new ArrayList<>();
+            List<Callable<String>> tasks = new ArrayList<>();
+            for (int i = 0; i < buyersPerRound; i++) {
+                long buyer = db.user("race" + round + "-" + i, "USER");
+                cartService.add(buyer, new CartItemAddRequest(coatBlack, 1));
+                cartService.add(buyer, new CartItemAddRequest(bagBlack, 1));
+                cartService.add(buyer, new CartItemAddRequest(shirtBlack, 1));
+                buyers.add(buyer);
+                tasks.add(() -> orderOutcome(buyer));
+            }
+            // 판매자: 가격 수정 + 옵션 추가(→ 재승인 대기), 품절 처리 / 관리자: 차단
+            tasks.add(() -> outcomeOf(() -> productService.update(sellerUserA, shirt, new ProductUpdateRequest(
+                    null, null, null, null, newPrice, null, null, null, null,
+                    List.of(new OptionRequest(newColor, DbFixtures.SIZE_M, 5))))));
+            tasks.add(() -> outcomeOf(
+                    () -> productService.changeSaleStatus(sellerUserA, coat, ProductStatus.SOLD_OUT)));
+            tasks.add(() -> outcomeOf(() -> productService.adminChangeStatus(bag,
+                    new AdminProductStatusRequest(ProductStatus.BLOCKED, null))));
+
+            List<String> outcomes = runTogether(tasks);
+
+            assertThat(outcomes.subList(buyersPerRound, outcomes.size())).as("상품 변경 (round %d)", round)
+                    .containsOnly("OK");
+            assertThat(outcomes.subList(0, buyersPerRound)).as("주문 (round %d)", round)
+                    .isSubsetOf("OK", ErrorCode.PRODUCT_NOT_PURCHASABLE.name());
+            for (int i = 0; i < buyersPerRound; i++) {
+                long buyer = buyers.get(i);
+                if ("OK".equals(outcomes.get(i))) {
+                    ordered++;
+                    // 판매중으로 보고 주문했다면 가격도 바뀌기 전 값이어야 한다 (상태와 가격은 한 번에 바뀐다)
+                    assertThat(count("SELECT total_price FROM orders WHERE user_id = " + buyer))
+                            .isEqualTo(oldPrice + 20_000 + 30_000);
+                    assertThat(cartService.getCart(buyer).items()).isEmpty();
+                } else {
+                    assertThat(count("SELECT COUNT(*) FROM orders WHERE user_id = " + buyer)).isZero();
+                    assertThat(cartService.getCart(buyer).items()).hasSize(3);
+                }
+            }
+            assertThat(statusOf(shirt)).isEqualTo("PENDING");
+            assertThat(count("SELECT price FROM products WHERE id = " + shirt)).isEqualTo(newPrice);
+            assertThat(statusOf(coat)).isEqualTo("SOLD_OUT");
+            assertThat(statusOf(bag)).isEqualTo("BLOCKED");
+        }
+
+        // 성공한 주문만큼만 재고가 줄었다
+        assertThat(stockOf(shirtBlack)).isEqualTo(1_000 - ordered);
+        assertThat(stockOf(coatBlack)).isEqualTo(1_000 - ordered);
+        assertThat(stockOf(bagBlack)).isEqualTo(1_000 - ordered);
+        assertIntegrity(List.of(shirtBlack, coatBlack, bagBlack));
+    }
+
     // ===== 주문 내용 =====
 
     @Test
@@ -285,8 +457,8 @@ class OrderCreateDbTest {
     // ===== helpers =====
 
     /** 한 트랜잭션 안에서: 체크한 장바구니를 먼저 읽고 → 다른 스레드가 change 를 커밋하게 한 뒤 → 주문한다 */
-    private void orderAfterConcurrentChange(long buyer, Runnable change) {
-        new TransactionTemplate(txManager).executeWithoutResult(status -> {
+    private OrderResponse orderAfterConcurrentChange(long buyer, Runnable change) {
+        return new TransactionTemplate(txManager).execute(status -> {
             assertThat(cartItemRepository.findSelectedForOrder(buyer)).isNotEmpty(); // 주문이 장바구니를 읽은 시점
             ExecutorService other = Executors.newSingleThreadExecutor();
             try {
@@ -296,13 +468,31 @@ class OrderCreateDbTest {
             } finally {
                 other.shutdown();
             }
-            orderService.create(buyer, ADDRESS); // 같은 트랜잭션에 합류 → 위에서 읽은 값으로 주문을 진행한다
+            // 같은 트랜잭션에 합류 → 일반 SELECT 는 위에서 읽은 시점의 값을 계속 본다 (잠금 조회만 최신 값을 본다)
+            return orderService.create(buyer, ADDRESS);
         });
     }
 
+    /** 판매자 A 의 tee 2개와 판매자 B 의 cap 1개를 담은 새 구매자 */
+    private long buyerWithTeeAndCap() {
+        long buyer = db.user("buyer", "USER");
+        cartService.add(buyer, new CartItemAddRequest(teeBlack, 2));
+        cartService.add(buyer, new CartItemAddRequest(capBlack, 1));
+        return buyer;
+    }
+
+    /** 가격(과 이름)만 바꾸는 상품 수정 요청. null 인 필드는 그대로 */
+    private static ProductUpdateRequest priceAndName(int price, String name) {
+        return new ProductUpdateRequest(null, null, name, null, price, null, null, null, null, null);
+    }
+
     private String orderOutcome(long buyer) {
+        return outcomeOf(() -> orderService.create(buyer, ADDRESS));
+    }
+
+    private String outcomeOf(Runnable work) {
         try {
-            orderService.create(buyer, ADDRESS);
+            work.run();
             return "OK";
         } catch (BusinessException e) {
             return e.getErrorCode().name();
@@ -350,6 +540,10 @@ class OrderCreateDbTest {
 
     /** 이 테스트가 만든 데이터에 대해 정합성 검사와 같은 규칙을 확인한다 (어긋난 건수가 0 이어야 한다) */
     private void assertIntegrity() {
+        assertIntegrity(List.of(teeBlack, teeWhite, capBlack));
+    }
+
+    private void assertIntegrity(List<Long> options) {
         String mine = " JOIN users u ON u.id = o.user_id WHERE u.email LIKE 'order-test-%'";
         assertThat(count("""
                 SELECT COUNT(*) FROM (
@@ -378,7 +572,7 @@ class OrderCreateDbTest {
                   JOIN orders o ON o.id = sh.order_id""" + mine + """
                    AND (SELECT COUNT(*) FROM stock_history h WHERE h.order_item_id = oi.id AND h.type = 'ORDER') <> 1"""))
                 .as("13 주문 줄마다 ORDER 이력 1건").isZero();
-        for (long option : List.of(teeBlack, teeWhite, capBlack)) {
+        for (long option : options) {
             List<Integer> afters = jdbc.queryForList(
                     "SELECT quantity_after FROM stock_history WHERE option_id = ? ORDER BY id", Integer.class, option);
             List<Integer> changes = jdbc.queryForList(
@@ -399,6 +593,14 @@ class OrderCreateDbTest {
 
     private int stockOf(long optionId) {
         return jdbc.queryForObject("SELECT stock_quantity FROM product_options WHERE id = ?", Integer.class, optionId);
+    }
+
+    private String statusOf(long productId) {
+        return jdbc.queryForObject("SELECT status FROM products WHERE id = ?", String.class, productId);
+    }
+
+    private long brandOf(long productId) {
+        return jdbc.queryForObject("SELECT brand_id FROM products WHERE id = ?", Long.class, productId);
     }
 
     private int count(String sql) {
