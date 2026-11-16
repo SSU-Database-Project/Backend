@@ -3,7 +3,7 @@ package com.ssu.shop.domain.inventory.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -23,6 +23,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -72,9 +73,25 @@ class StockServiceTest {
     }
 
     @Test
+    void 옵션은_넘긴_순서와_상관없이_id_오름차순으로_한_행씩_잠근다() {
+        ProductOption first = option(1L, 10);
+        ProductOption second = option(2L, 10);
+        ProductOption third = option(3L, 10);
+        when(optionRepository.findAllById(any())).thenReturn(List.of(third, first, second)); // DB 가 돌려준 순서는 섞여 있다
+
+        stockService.lock(List.of(3L, 1L, 2L, 1L));
+
+        InOrder order = inOrder(entityManager);
+        order.verify(entityManager).refresh(first, LockModeType.PESSIMISTIC_WRITE);
+        order.verify(entityManager).refresh(second, LockModeType.PESSIMISTIC_WRITE);
+        order.verify(entityManager).refresh(third, LockModeType.PESSIMISTIC_WRITE);
+        order.verifyNoMoreInteractions(); // 같은 옵션을 두 번 넘겨도 한 번만
+    }
+
+    @Test
     void 없는_옵션이면_NOT_FOUND() {
         ProductOption missing = option(99L, 5);
-        when(optionRepository.lockAllByIdInOrder(anyCollection())).thenReturn(List.of());
+        when(optionRepository.findAllById(any())).thenReturn(List.of());
 
         assertThatThrownBy(() -> stockService.decrease(List.of(orderItem(100L, missing, 1))))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -207,10 +224,9 @@ class StockServiceTest {
         return option;
     }
 
-    /** 잠금 조회가 이 옵션을 돌려주도록 준비한다 */
+    /** 옵션 조회가 이 옵션을 돌려주도록 준비한다 (잠금과 최신 값 읽기는 entityManager.refresh 가 한다) */
     private ProductOption lockedOption(long id, int stock) {
         ProductOption option = option(id, stock);
-        when(optionRepository.lockAllByIdInOrder(anyCollection())).thenReturn(List.of(id));
         when(optionRepository.findAllById(any())).thenReturn(List.of(option));
         return option;
     }

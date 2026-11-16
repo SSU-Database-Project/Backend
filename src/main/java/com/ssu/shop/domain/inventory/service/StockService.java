@@ -9,7 +9,9 @@ import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -120,8 +122,12 @@ public class StockService {
     }
 
     /**
-     * 옵션 행을 id 오름차순으로 잠근 뒤, 잠근 상태에서 DB 의 최신 값으로 다시 읽는다.
+     * 옵션 행을 id 오름차순으로 한 행씩 잠그면서(SELECT ... WHERE id = ? FOR UPDATE), 잠근 상태에서 DB 의 최신 값으로 다시 읽는다.
      *
+     * id 오름차순인 이유: 누가 부르든 같은 순서로 잠그므로, 여러 옵션을 한 번에 주문해도 서로를 기다리다 멈추는 데드락이 생기지 않는다.
+     * 한 행씩 잠그는 이유: id IN (...) 처럼 여러 행을 한 문장으로 잠그면 MySQL 이 훑고 지나간 옆 행과 그 사이 간격까지 잠글 수 있다.
+     * 그러면 주문이 자기와 상관없는 옵션(판매자가 상품 수정으로 방금 추가해 아직 커밋하지 않은 옵션)을 기다리게 되는데,
+     * 그 판매자는 주문이 잡고 있는 상품 행을 기다리고 있어 데드락이 난다. id 하나를 = 로 찾으면 그 행만 잠근다.
      * 다시 읽는 이유: 호출한 쪽이 같은 트랜잭션에서 옵션을 이미 읽어 두었다면, JPA 는 그 옵션을 다시 조회해도
      * 메모리에 있던 예전 재고를 그대로 돌려준다. 그 사이 다른 주문이 재고를 바꿨다면 틀린 값으로 계산하게 된다.
      * refresh 는 메모리의 값을 DB 의 현재 값으로 덮어쓴다.
@@ -133,13 +139,15 @@ public class StockService {
         if (ids.isEmpty()) {
             return Map.of();
         }
-        List<Long> lockedIds = optionRepository.lockAllByIdInOrder(ids);
-        if (lockedIds.size() != ids.size()) {
+        // 잠금 없이 한 번에 읽는다: 없는 옵션을 걸러 내고 잠글 대상을 얻는 용도. 여기서 읽힌 재고 값은 쓰지 않는다
+        List<ProductOption> found = new ArrayList<>(optionRepository.findAllById(ids));
+        if (found.size() != ids.size()) {
             throw BusinessException.notFound("상품 옵션");
         }
+        found.sort(Comparator.comparing(ProductOption::getId));
         Map<Long, ProductOption> options = new HashMap<>();
-        // 옵션마다 SELECT 1번. 주문당 옵션은 몇 개라 충분하다. 수백 개를 한 번에 바꾸게 되면 한 쿼리로 합친다
-        for (ProductOption option : optionRepository.findAllById(lockedIds)) {
+        // 옵션마다 SELECT ... FOR UPDATE 1번 (잠금과 다시 읽기를 한 문장으로). 주문당 옵션은 몇 개라 충분하다
+        for (ProductOption option : found) {
             entityManager.refresh(option, LockModeType.PESSIMISTIC_WRITE);
             options.put(option.getId(), option);
         }

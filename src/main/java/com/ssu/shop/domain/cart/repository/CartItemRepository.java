@@ -26,6 +26,31 @@ public interface CartItemRepository extends JpaRepository<CartItem, Long> {
             """)
     List<CartItem> findAllWithDetailsByUserId(@Param("userId") Long userId);
 
+    /**
+     * 주문할 항목: 체크한 것만, 주문에 필요한 것을 쿼리 1번으로 (옵션 + 상품 + 브랜드 + 판매자 + 색상 + 사이즈).
+     */
+    @Query("""
+            select i from CartItem i
+              join fetch i.option o
+              join fetch o.product p
+              join fetch p.brand b
+              join fetch b.seller
+              join fetch o.color
+              join fetch o.size
+             where i.cart.user.id = :userId and i.selected = true
+             order by i.id
+            """)
+    List<CartItem> findSelectedForOrder(@Param("userId") Long userId);
+
+    /**
+     * 주문한 항목 하나를, 주문할 때 읽은 그대로(수량이 같고 아직 체크된 상태)일 때만 지운다. 지운 줄 수(0 또는 1)를 돌려준다.
+     * DELETE 는 트랜잭션 시작 시점이 아니라 지금 커밋된 값을 보므로, 주문하는 사이 다른 요청이 수량이나 체크를 바꿨거나
+     * 먼저 주문해 지웠다면 0 이 나온다 → 주문 서비스가 DATA_CONFLICT 로 전체를 롤백한다.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("delete from CartItem i where i.id = :id and i.quantity = :quantity and i.selected = true")
+    int deleteIfUnchanged(@Param("id") Long id, @Param("quantity") int quantity);
+
     /** 내 장바구니의 항목만 찾는다 (남의 항목 id 를 넣으면 없는 것으로 나온다) */
     @Query("select i from CartItem i where i.id = :id and i.cart.user.id = :userId")
     Optional<CartItem> findByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);
