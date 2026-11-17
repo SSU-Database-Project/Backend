@@ -38,7 +38,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [x] Docker 구성 (MySQL + 앱)
 - [x] GitHub 저장소, 패키지명 `com.ssu.shop`
 - [x] 회원제: 가입·로그인 외 로그인 필수
-- [ ] 앱 컨테이너 이미지를 V4 코드로 다시 빌드해 확인
+- [x] 앱 컨테이너 이미지를 최신 코드로 다시 빌드해 확인 (11-17: 빈 DB에서 V1~V5·시연 데이터 자동 적용, 시연 주문 300건, 정합성 15종 0건, Docker `shop_test`로 테스트 154개 통과)
 - [ ] 샘플 이미지 22장 준비 (`src/main/resources/static/images/samples/`, 파일명은 [1.3](#13-시연-계정-local-프로필)) — 팀
 - [ ] 배포 방식 결정 (로컬 시연 / 클라우드) — 팀
 
