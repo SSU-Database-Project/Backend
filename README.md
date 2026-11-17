@@ -7,7 +7,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - 요구사항: [`docs/명세서.md`](docs/명세서.md)
 - API 문서: 앱 실행 후 http://localhost:8080/swagger-ui.html
 
-목차: [작업 현황](#작업-현황-트랙별) · [1. 실행](#1-실행) · [2. 테스트](#2-테스트) · [3. 패키지 구조](#3-패키지-구조) · [4. DB 설계](#4-db-설계) · [5. 인덱스와 실행 계획](#5-인덱스와-실행-계획-explain) · [6. 변경 이력과 남은 작업](#6-변경-이력과-남은-작업)
+목차: [작업 현황](#작업-현황-트랙별) · [1. 실행](#1-실행) · [2. 테스트](#2-테스트) · [3. 패키지 구조](#3-패키지-구조) · [4. DB 설계](#4-db-설계) · [5. 인덱스와 실행 계획](#5-인덱스와-실행-계획-explain) · [6. 변경 이력과 남은 작업](#6-변경-이력과-남은-작업) · [7. AWS 배포 가이드](#7-aws-배포-가이드-ec2--docker-compose)
 
 ---
 
@@ -18,7 +18,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 
 | 트랙 | 담당 | 진행 | 상태 |
 | --- | --- | --- | --- |
-| [A. 공통 기반·인프라](#a-공통-기반인프라) | BE-1 | 7 / 9 | 🔶 샘플 이미지·배포 방식 남음 |
+| [A. 공통 기반·인프라](#a-공통-기반인프라) | BE-1 | 8 / 10 | 🔶 샘플 이미지·실제 AWS 배포 남음 |
 | [B. DB 설계·데이터](#b-db-설계데이터) | BE-1 | 6 / 6 | ✅ 완료 |
 | [C. 회원·판매자](#c-회원판매자) | BE-1 | 5 / 5 | ✅ 완료 |
 | [D. 브랜드·상품](#d-브랜드상품) | BE-1 | 5 / 5 | ✅ 완료 |
@@ -27,7 +27,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 | [G. 장바구니](#g-장바구니) | BE-2 | 2 / 2 | ✅ 완료 |
 | [H. 주문·배송](#h-주문배송) | BE-2 | 6 / 6 | ✅ 완료 |
 | [I. 통계](#i-통계) | BE-1 | 4 / 4 | ✅ 완료 |
-| [팀 결정](#팀-결정) | 팀 | 0 / 4 | ⬜ |
+| [팀 결정](#팀-결정) | 팀 | 1 / 4 | 🔶 배포 방식 결정됨 |
 
 순서: **F(재고 변경 서비스) → H(주문)**. I(통계)는 B의 시연 주문 데이터가 있으면 H를 기다리지 않고 시작할 수 있습니다.
 
@@ -40,7 +40,8 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [x] 회원제: 가입·로그인 외 로그인 필수
 - [x] 앱 컨테이너 이미지를 최신 코드로 다시 빌드해 확인 (11-17: 빈 DB에서 V1~V5·시연 데이터 자동 적용, 시연 주문 300건, 정합성 15종 0건, Docker `shop_test`로 테스트 154개 통과)
 - [ ] 샘플 이미지 22장 준비 (`src/main/resources/static/images/samples/`, 파일명은 [1.3](#13-시연-계정-local-프로필)) — 팀
-- [ ] 배포 방식 결정 (로컬 시연 / 클라우드) — 팀
+- [x] 배포 방식 결정 — AWS EC2 + Docker Compose (11-17 팀 결정). 서버용 설정(`docker-compose.prod.yml`, `.env.example`, `scripts/deploy.sh`)과 [7장 가이드](#7-aws-배포-가이드-ec2--docker-compose) 준비
+- [ ] 실제 AWS 배포 (7장대로) — 팀원
 
 ### B. DB 설계·데이터
 - [x] 스키마 V1~V5 (테이블 14개, 제약조건, V5 = 판매자 상태별 배송 인덱스), DB 제약 테스트 18개
@@ -96,7 +97,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [ ] 백엔드 역할 분담 확정
 - [ ] 통계에 넣을 주문 기준 — **지금 구현: 취소만 제외, 주문일 기준** (다르게 정하면 `StatsRepository` 조건만 바꾸면 됨)
 - [ ] 회의 결정사항 문서의 "확인 요청" 항목 (대표 이미지 1장, 카테고리·색상·사이즈 목록 등)
-- [ ] 배포 방식 (A 트랙과 같은 항목)
+- [x] 배포 방식 — AWS EC2 + Docker Compose (A 트랙과 같은 항목)
 
 ---
 
@@ -145,7 +146,10 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
 | `JWT_SECRET` | 개발용 고정값 (배포 시 반드시 변경, 32바이트 이상) |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@shop.com` / `admin1234!` |
 | `UPLOAD_DIR` | `./uploads` (상품·브랜드 이미지 저장 폴더) |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` (프론트 주소, 여러 개면 쉼표로) |
 | `SPRING_PROFILES_ACTIVE` | `local` (시연 데이터 포함). `prod`면 시연 데이터 미적용 |
+
+서버 배포 때는 이 값들을 `.env`에 넣습니다 → [7장](#7-aws-배포-가이드-ec2--docker-compose).
 
 ### 1.3 시연 계정 (`local` 프로필)
 
@@ -586,3 +590,147 @@ V4 스키마에 대량 데이터를 넣고 `EXPLAIN ANALYZE`로 실제 실행을
 ### 6.3 남은 작업
 
 트랙별 진행 상황은 맨 위 [작업 현황](#작업-현황-트랙별)에서 관리합니다. 2차 과제: 상세 이미지 여러 장, 옵션별 추가 가격, ngram FULLTEXT 검색, `daily_sales` 집계 테이블.
+
+---
+
+## 7. AWS 배포 가이드 (EC2 + Docker Compose)
+
+로컬에서 쓰던 Docker 구성을 EC2 서버 한 대에 그대로 올립니다. 서버에서는 `docker-compose.prod.yml`을 덧씌워 실행합니다. 이 파일은 비밀값을 `.env`에 넣지 않으면 **실행 자체를 거부**하고, DB 포트를 밖에 열지 않으며, 앱을 80번 포트로 엽니다. 서버가 재부팅되면 컨테이너도 자동으로 다시 뜹니다.
+
+```
+인터넷 ──80──▶ [EC2] shop-app (Spring Boot) ──내부 네트워크──▶ shop-mysql (MySQL 8.0, 밖에서 접속 불가)
+                       │                                         │
+                  shop-uploads 볼륨 (업로드 이미지)           shop-mysql-data 볼륨 (DB)
+```
+
+> 이 구성은 2026-11-17에 이 PC에서 서버와 같은 방식(prod 설정, 임시 비밀값)으로 실행해 확인했습니다. 관리자 기본 비밀번호 차단, CORS 허용 주소, 재배포 후 업로드 이미지 유지, DB 포트 비노출을 확인했습니다. 실제 AWS 콘솔 화면은 바뀔 수 있으니 메뉴 이름이 다르면 비슷한 항목을 찾으세요.
+
+### 7.1 EC2 인스턴스 만들기 (AWS 콘솔)
+
+| 항목 | 값 | 이유 |
+| --- | --- | --- |
+| 리전 | 아시아 태평양(서울) `ap-northeast-2` | 가까운 곳 |
+| AMI | Ubuntu Server 24.04 LTS | 아래 명령이 Ubuntu 기준 |
+| 인스턴스 유형 | **t3.small (메모리 2GB) 권장** | MySQL + Spring Boot + 서버에서 Gradle 빌드. t3.micro(1GB, 프리 티어)도 되지만 7.3의 스왑 설정이 꼭 필요하고 빌드가 느림 |
+| 키 페어 | 새로 만들어 `.pem` 파일 보관 | SSH 접속용. 잃어버리면 접속 불가 |
+| 스토리지 | 20GB gp3 | Docker 이미지·DB·업로드 이미지 |
+| 보안 그룹 (인바운드) | **SSH 22: 내 IP만**, **HTTP 80: 0.0.0.0/0** | 3306·3308·8080은 열지 않는다 |
+
+만든 뒤 **탄력적 IP**를 할당해 인스턴스에 연결합니다. 그래야 인스턴스를 껐다 켜도 주소가 바뀌지 않습니다. 아래에서 `<서버IP>`는 이 주소입니다.
+
+### 7.2 접속과 Docker 설치
+
+```bash
+# 내 PC에서 (Windows는 PowerShell, .pem 파일이 있는 폴더에서)
+ssh -i shop-key.pem ubuntu@<서버IP>
+
+# 서버에서: Docker + Compose 설치 (공식 설치 스크립트)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+exit                                   # 다시 접속해야 docker 그룹이 적용된다
+ssh -i shop-key.pem ubuntu@<서버IP>
+docker compose version                 # 2.24 이상이어야 한다 (prod 설정의 !reset·!override 문법)
+```
+
+### 7.3 (t3.micro일 때만) 스왑 2GB 추가
+
+메모리 1GB로는 Gradle 빌드 중 메모리가 모자라 빌드가 멈출 수 있습니다.
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # 재부팅 후에도 유지
+free -h                                                       # Swap 2.0Gi 확인
+```
+
+### 7.4 코드 받기 (비공개 저장소 → 읽기 전용 배포 키)
+
+저장소가 비공개라서 서버가 읽기만 할 수 있는 키를 하나 만들어 GitHub에 등록합니다. 개인 계정 비밀번호나 토큰을 서버에 두지 않아도 됩니다.
+
+```bash
+ssh-keygen -t ed25519 -C "shop-ec2-deploy" -f ~/.ssh/github_deploy -N ""
+cat ~/.ssh/github_deploy.pub     # 출력된 한 줄을 복사
+```
+
+GitHub 저장소 → **Settings → Deploy keys → Add deploy key**에 붙여 넣습니다(Allow write access는 **체크하지 않음**). 저장소 admin 권한이 있어야 등록할 수 있습니다.
+
+```bash
+cat >> ~/.ssh/config <<'CFG'
+Host github.com
+  IdentityFile ~/.ssh/github_deploy
+  IdentitiesOnly yes
+CFG
+git clone git@github.com:SSU-Database-Project/Backend.git
+cd Backend
+```
+
+### 7.5 비밀값 설정 (.env)
+
+```bash
+cp .env.example .env
+openssl rand -base64 24    # DB_PASSWORD, MYSQL_ROOT_PASSWORD, ADMIN_PASSWORD 용으로 3번 실행해 하나씩 사용
+openssl rand -base64 48    # JWT_SECRET 용
+nano .env                  # 값 채우기 (저장: Ctrl+O, Enter, 종료: Ctrl+X)
+chmod 600 .env             # 나만 읽을 수 있게
+```
+
+| 변수 | 설명 |
+| --- | --- |
+| `MYSQL_ROOT_PASSWORD`, `DB_PASSWORD` | DB 비밀번호. **DB를 처음 만들 때만 적용**된다(7.9 참고) |
+| `JWT_SECRET` | 로그인 토큰 서명 키. 바꾸면 기존 로그인은 모두 풀린다 |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | 앱이 처음 뜰 때 만드는 관리자 계정. README의 개발용 비밀번호(`admin1234!`)를 쓰지 않는다 |
+| `CORS_ALLOWED_ORIGINS` | API를 부를 **프론트 주소** (예: `http://<서버IP>:5173`, `https://shop.example.com`). 여러 개면 쉼표로. 주소가 한 글자라도 다르면 브라우저가 막는다 |
+| `SPRING_PROFILES_ACTIVE` | `local` = 시연 데이터(판매자·상품 27개·주문 300건) 포함, `prod` = 빈 상태로 시작 |
+
+`.env`는 `.gitignore`에 들어 있어 git에 올라가지 않습니다. 비밀값은 팀 채팅방이 아니라 서버의 이 파일에만 둡니다.
+
+### 7.6 실행과 확인
+
+```bash
+./scripts/deploy.sh --no-pull     # 첫 실행: 이미지 빌드(몇 분) → 실행 → 응답 확인
+```
+
+- 서버에서 `[deploy] 완료`가 나오면 내 PC 브라우저에서 `http://<서버IP>/swagger-ui.html`을 엽니다.
+- `.env`의 관리자 계정으로 로그인되는지 확인합니다(`POST /api/auth/login`).
+- 첫 실행 때 DB 테이블과(local이면) 시연 데이터는 Flyway가 자동으로 만듭니다.
+
+### 7.7 업데이트 (main에 새 코드가 머지된 뒤)
+
+```bash
+cd ~/Backend && ./scripts/deploy.sh
+```
+
+`git pull` → 이미지 다시 빌드 → 재시작 → 응답 확인까지 한 번에 합니다. DB 데이터와 업로드 이미지는 볼륨에 있어 그대로 남고, 새 마이그레이션(V6 …)이 있으면 앱이 뜰 때 자동으로 적용됩니다.
+
+### 7.8 자주 쓰는 명령
+
+```bash
+C="docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile app"
+$C ps                         # 상태
+$C logs -f --tail 100 app     # 앱 로그 (Ctrl+C로 빠져나옴)
+$C restart app                # 앱만 재시작
+$C down                       # 전체 중지 (데이터는 남음)
+
+# DB 백업 / 정합성 검사
+docker exec shop-mysql sh -c 'mysqldump -ushop -p"$MYSQL_PASSWORD" shop' > backup-$(date +%F).sql
+docker exec -i shop-mysql sh -c 'mysql --default-character-set=utf8mb4 -ushop -p"$MYSQL_PASSWORD" shop' < scripts/check-integrity.sql
+```
+
+### 7.9 주의할 점
+
+- **`down -v`는 DB와 업로드 이미지를 모두 지웁니다.** 시연 직전에 처음 상태로 되돌릴 때만 씁니다.
+- **DB 비밀번호를 나중에 바꿀 때**: `.env`만 바꾸면 안 됩니다. MySQL은 볼륨을 처음 만들 때만 비밀번호를 설정하므로, 앱은 새 비밀번호로 접속하는데 DB는 옛 비밀번호라 앱이 뜨지 않습니다. 데이터를 지워도 되면 `$C down -v` 후 다시 실행하고, 지키려면 DB 안에서 먼저 `ALTER USER 'shop'@'%' IDENTIFIED BY '새비밀번호';`를 실행한 뒤 `.env`를 바꿉니다.
+- **프론트를 HTTPS로 배포하면**(Vercel, Amplify, CloudFront 등) 브라우저가 HTTP API 호출을 막습니다(mixed content). 그때는 백엔드도 HTTPS가 필요합니다. 도메인을 연결하고 Nginx나 Caddy로 인증서(Let's Encrypt)를 붙이거나, 프론트와 백엔드를 같은 주소 아래에 둡니다. 프론트가 HTTP면 지금 구성 그대로 됩니다.
+- **비용**: 쓰지 않을 때는 인스턴스를 중지합니다. 퍼블릭 IPv4 주소에도 시간당 요금이 붙을 수 있으니, 프로젝트가 끝나면 인스턴스를 종료하고 탄력적 IP를 해제합니다.
+- **보안 그룹**에 3306·3308·8080을 열지 않습니다. DB는 서버 밖에서 접속할 필요가 없습니다.
+
+### 7.10 문제가 생기면
+
+| 증상 | 확인할 것 |
+| --- | --- |
+| `required variable ... is missing a value` | `.env`에 그 변수가 비어 있음 (의도된 동작) |
+| 브라우저에서 접속이 안 됨 | 보안 그룹의 HTTP 80 인바운드, `$C ps`에서 `0.0.0.0:80->8080` |
+| 빌드 중 멈추거나 `Killed` | 메모리 부족 → 7.3 스왑, 또는 t3.small |
+| 앱이 계속 재시작 | `$C logs app`. `Access denied`면 7.9 DB 비밀번호 |
+| 프론트에서 CORS 오류 | `CORS_ALLOWED_ORIGINS`가 브라우저 주소창의 프론트 주소(스킴·포트 포함)와 정확히 같은지. 바꾼 뒤 `$C up -d` |
+| `!override` / `!reset` 문법 오류 | `docker compose version`이 2.24 미만 → 7.2의 공식 스크립트로 다시 설치 |
