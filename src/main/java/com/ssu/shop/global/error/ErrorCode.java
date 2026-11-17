@@ -13,6 +13,7 @@ public enum ErrorCode {
     CATEGORY_NOT_LEAF(HttpStatus.BAD_REQUEST, "상품은 소분류 카테고리에만 등록할 수 있습니다."),
     INVALID_OPTION(HttpStatus.BAD_REQUEST, "상품 옵션(색상·사이즈)이 올바르지 않습니다."),
     INVALID_FILE(HttpStatus.BAD_REQUEST, "업로드할 수 없는 파일입니다."),
+    NO_ORDER_ITEMS(HttpStatus.BAD_REQUEST, "주문할 상품이 없습니다. 장바구니에서 주문할 상품을 체크해 주세요."),
 
     // 401
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다. 토큰이 없거나 만료되었습니다."),
@@ -45,6 +46,7 @@ public enum ErrorCode {
     // BE-2 (Inventory / Order) 용
     OUT_OF_STOCK(HttpStatus.CONFLICT, "재고가 부족합니다."),
     INVALID_ORDER_STATUS(HttpStatus.CONFLICT, "현재 주문 상태에서는 처리할 수 없습니다."),
+    PRODUCT_NOT_PURCHASABLE(HttpStatus.CONFLICT, "지금 구매할 수 없는 상품이 포함되어 있습니다."),
 
     // 500
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.");

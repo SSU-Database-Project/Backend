@@ -51,4 +51,25 @@ public class OrderItem {
 
     @Column(nullable = false)
     private Integer quantity;
+
+    private OrderItem(Shipment shipment, ProductOption option, String productName, String colorName,
+                      String sizeLabel, int unitPrice, int quantity) {
+        this.shipment = shipment;
+        this.option = option;
+        this.productName = productName;
+        this.colorName = colorName;
+        this.sizeLabel = sizeLabel;
+        this.unitPrice = unitPrice;
+        this.quantity = quantity;
+    }
+
+    /** 주문 시점의 상품명·색상·사이즈·단가를 옵션에서 복사해 둔다. 만든 뒤에는 고치지 않는다. */
+    public static OrderItem create(Shipment shipment, ProductOption option, int quantity) {
+        return new OrderItem(shipment, option, option.getProduct().getName(), option.getColor().getName(),
+                option.getSize().getLabel(), option.getProduct().getPrice(), quantity);
+    }
+
+    public long lineTotal() {
+        return (long) unitPrice * quantity;
+    }
 }

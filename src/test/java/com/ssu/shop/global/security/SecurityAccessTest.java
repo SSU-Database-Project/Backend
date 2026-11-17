@@ -5,9 +5,14 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssu.shop.domain.cart.controller.CartController;
+import com.ssu.shop.domain.cart.service.CartService;
+import com.ssu.shop.domain.like.controller.LikeController;
+import com.ssu.shop.domain.like.service.LikeService;
 import com.ssu.shop.domain.product.controller.ProductController;
 import com.ssu.shop.domain.product.controller.SellerProductController;
 import com.ssu.shop.domain.product.service.ProductService;
@@ -29,12 +34,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** URL 프리픽스 권한 + 401/403 공통 응답 JSON 검증 (DB 없이 실행) */
-@WebMvcTest(controllers = {ProductController.class, SellerProductController.class, AdminUserController.class})
+@WebMvcTest(controllers = {ProductController.class, SellerProductController.class, AdminUserController.class,
+        LikeController.class, CartController.class})
 @Import({SecurityConfig.class, JwtProvider.class, SecurityErrorHandlers.class})
 @EnableConfigurationProperties({JwtProperties.class, AppProperties.class})
 class SecurityAccessTest {
@@ -50,6 +57,10 @@ class SecurityAccessTest {
     ProductService productService;
     @MockitoBean
     AdminUserService adminUserService;
+    @MockitoBean
+    LikeService likeService;
+    @MockitoBean
+    CartService cartService;
 
     private static final PageResponse<Object> EMPTY = new PageResponse<>(List.of(), 0, 20, 0, 0);
 
@@ -139,5 +150,59 @@ class SecurityAccessTest {
         mockMvc.perform(get("/api/products")
                         .header(HttpHeaders.AUTHORIZATION, tokenFor(5L, Role.USER, UserStatus.WITHDRAWN)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 좋아요는_일반회원만_판매자는_403() throws Exception {
+        mockMvc.perform(post("/api/products/1/like")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(2L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/users/me/likes")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(6L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+    }
+
+    // ===== [BE-2] 장바구니·주문 =====
+
+    @Test
+    void 장바구니와_주문은_일반회원만_판매자는_403() throws Exception {
+        mockMvc.perform(get("/api/cart")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(2L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/cart/items")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(2L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/orders")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(2L, Role.SELLER, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/orders/1")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(7L, Role.ADMIN, UserStatus.ACTIVE)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void 비회원은_장바구니도_401() throws Exception {
+        mockMvc.perform(get("/api/cart"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 일반회원은_장바구니를_조회할_수_있다() throws Exception {
+        mockMvc.perform(get("/api/cart")
+                        .header(HttpHeaders.AUTHORIZATION, tokenFor(1L, Role.USER, UserStatus.ACTIVE)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void 장바구니_수량은_1에서_99까지만_받는다() throws Exception {
+        for (String body : List.of("{\"optionId\":1,\"quantity\":0}", "{\"optionId\":1,\"quantity\":100}",
+                "{\"quantity\":1}")) {
+            mockMvc.perform(post("/api/cart/items")
+                            .header(HttpHeaders.AUTHORIZATION, tokenFor(1L, Role.USER, UserStatus.ACTIVE))
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"));
+        }
     }
 }

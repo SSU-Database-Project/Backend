@@ -60,4 +60,14 @@ public class ProductOption extends BaseTimeEntity {
     public static ProductOption create(Product product, Color color, Size size, int initialStock) {
         return new ProductOption(product, color, size, initialStock);
     }
+
+    /**
+     * [BE-2] 재고를 delta 만큼 바꾸고 바뀐 재고를 돌려준다 (delta 가 음수면 차감).
+     * StockService 에서만 호출한다 — 행을 잠그고, 검증하고, 재고 이력을 함께 남겨야 하기 때문이다.
+     * int 범위를 넘으면 음수로 바뀌지 않고 ArithmeticException 이 난다 (StockService 가 먼저 막지만 마지막 방어선).
+     */
+    public int changeStock(int delta) {
+        this.stockQuantity = Math.addExact(this.stockQuantity, delta);
+        return this.stockQuantity;
+    }
 }

@@ -1,0 +1,13 @@
+-- =====================================================================
+-- V5: 판매자의 상태별 배송 묶음 조회용 인덱스 (2026-11-11)
+--
+-- 쓰는 쿼리
+--  - 판매자 대시보드 "처리할 배송 수": WHERE seller_id = ? AND status IN ('ORDERED','PREPARING','SHIPPING')
+--  - 판매자 주문 관리의 상태별 목록 (BE-2): WHERE seller_id = ? AND status = ? ORDER BY created_at DESC
+--
+-- 기존 idx_shipments_seller_created (seller_id, created_at) 로는 상태 조건을 인덱스에서 거르지 못해
+-- 판매자의 배송 묶음을 전부 읽는다 (판매자당 2,500건에서 10.7 ms, README 5.5).
+-- 처리할 배송은 대부분 최근 것 몇 건이라, (seller_id, status) 가 앞에 오면 그 몇 건만 읽는다.
+-- created_at 을 뒤에 두어 상태별 목록의 최신순 정렬도 인덱스로 끝낸다.
+-- =====================================================================
+CREATE INDEX idx_shipments_seller_status_created ON shipments (seller_id, status, created_at);

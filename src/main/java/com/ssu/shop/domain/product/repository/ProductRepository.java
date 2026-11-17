@@ -3,6 +3,7 @@ package com.ssu.shop.domain.product.repository;
 import com.ssu.shop.domain.product.entity.Product;
 import com.ssu.shop.domain.product.entity.ProductStatus;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,12 +41,24 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     int transitStatus(@Param("id") Long id, @Param("from") Collection<ProductStatus> from,
                       @Param("to") ProductStatus to, @Param("rejectReason") String rejectReason);
 
-    /** 판매자 탈퇴 시 그 판매자의 모든 상품을 판매 종료 */
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    /** 판매자의 아직 삭제되지 않은 상품 id, 오름차순 (판매자 탈퇴 시 잠그는 순서) */
+    @Query("""
+            select p.id from Product p
+             where p.brand.seller.id = :sellerId
+               and p.status <> com.ssu.shop.domain.product.entity.ProductStatus.DELETED
+             order by p.id
+            """)
+    List<Long> findActiveIdsBySeller(@Param("sellerId") Long sellerId);
+
+    /**
+     * 상품 하나를 판매 종료(DELETED). PK 로 한 행만 찾으므로 그 행 하나만 잠근다.
+     * clearAutomatically 를 쓰지 않는다: 영속성 컨텍스트를 비우면 같은 트랜잭션에서 읽어 둔 엔티티(예: 탈퇴시킬 회원)가
+     * 관리 대상에서 빠져, 그 뒤의 변경이 저장되지 않는다.
+     */
+    @Modifying
     @Query("""
             update Product p set p.status = com.ssu.shop.domain.product.entity.ProductStatus.DELETED
-             where p.brand.id in (select b.id from Brand b where b.seller.id = :sellerId)
-               and p.status <> com.ssu.shop.domain.product.entity.ProductStatus.DELETED
+             where p.id = :id and p.status <> com.ssu.shop.domain.product.entity.ProductStatus.DELETED
             """)
-    int deleteAllBySeller(@Param("sellerId") Long sellerId);
+    int markDeleted(@Param("id") Long id);
 }
