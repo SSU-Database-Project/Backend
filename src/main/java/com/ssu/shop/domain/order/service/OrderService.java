@@ -14,7 +14,9 @@ import com.ssu.shop.domain.order.repository.ShipmentRepository;
 import com.ssu.shop.domain.product.entity.Product;
 import com.ssu.shop.domain.product.entity.ProductStatus;
 import com.ssu.shop.domain.seller.entity.Seller;
+import com.ssu.shop.domain.user.entity.UserStatus;
 import com.ssu.shop.domain.user.repository.UserRepository;
+import com.ssu.shop.domain.user.repository.UserRepository.UserStatusRow;
 import com.ssu.shop.global.common.PageResponse;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
@@ -27,7 +29,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -55,6 +59,7 @@ public class OrderService {
      *
      * 순서
      *  1) 체크한 장바구니 항목 조회 (쿼리 1번)
+     *  1-1) 구매자·판매자 회원 행 잠금 + 둘 다 이용 중인지 확인 (이유는 lockAccounts 주석)
      *  2) 상품 행 잠금 + 최신 값으로 다시 읽기 (이유는 lockProducts 주석)
      *  3) 옵션 행 잠금 — 주문 줄을 저장하기 전에 (이유는 StockService.lock 주석)
      *  4) 판매중이 아닌 상품이 섞여 있으면 주문 전체 거부 — 2) 에서 다시 읽은 상태로 검사한다
@@ -63,7 +68,7 @@ public class OrderService {
      *  6) 재고 차감 + 재고 이력 (주문 줄마다 한 번)
      *  7) 주문한 장바구니 항목 삭제
      *
-     * 잠그는 순서는 항상 상품(id 오름차순) → 옵션(id 오름차순)이다. 이 순서를 바꾸면 주문끼리, 또는 주문과 상품 변경이
+     * 잠그는 순서는 항상 회원(id 오름차순) → 상품(id 오름차순) → 옵션(id 오름차순)이다. 이 순서를 바꾸면 주문끼리, 또는 주문과 상품 변경이
      * 서로를 기다리다 멈출 수 있다.
      */
     @Transactional
@@ -72,6 +77,7 @@ public class OrderService {
         if (cartItems.isEmpty()) {
             throw new BusinessException(ErrorCode.NO_ORDER_ITEMS);
         }
+        lockAccounts(userId, cartItems);
         lockProducts(cartItems);
         stockService.lock(cartItems.stream().map(item -> item.getOption().getId()).toList());
 
@@ -178,6 +184,35 @@ public class OrderService {
     /** DB 의 DATETIME(6) 에 맞춰 마이크로초까지만 남긴다 */
     private LocalDateTime now() {
         return LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /**
+     * 구매자와 판매자들의 회원 행을 id 오름차순으로 잠그고(공유 잠금, FOR SHARE) 모두 이용 중(ACTIVE)인지 본다.
+     *  - 정지된 판매자의 상품은 주문할 수 없다 (팀 결정, 2026-11-17): 정지된 판매자는 로그인을 못 해 배송할 수 없다.
+     *  - 관리자의 정지·탈퇴(AccountLifecycle)는 같은 회원 행을 FOR UPDATE 로 잠근다. 그래서 둘이 동시에 오면 한쪽이 기다린다:
+     *    주문이 먼저면 관리자가 이 주문까지 세어 "진행 중인 주문"으로 거절하고, 관리자가 먼저면 여기서 바뀐 상태를 보고 거절한다.
+     * 상품보다 먼저 잠근다. 판매자 탈퇴도 회원 → 상품 순서로 잠그므로 서로 기다리다 멈추지 않는다.
+     */
+    private void lockAccounts(Long buyerId, List<CartItem> cartItems) {
+        Set<Long> userIds = new TreeSet<>();
+        userIds.add(buyerId);
+        Map<Long, String> productNameBySellerUser = new LinkedHashMap<>();
+        for (CartItem cartItem : cartItems) {
+            Product product = cartItem.getOption().getProduct();
+            Long sellerUserId = product.getSeller().getUser().getId();
+            userIds.add(sellerUserId);
+            productNameBySellerUser.putIfAbsent(sellerUserId, product.getName());
+        }
+        for (UserStatusRow row : userRepository.lockStatuses(userIds)) {
+            if (UserStatus.ACTIVE.name().equals(row.getStatus())) {
+                continue;
+            }
+            if (row.getId().equals(buyerId)) {
+                throw new BusinessException(ErrorCode.ACCOUNT_SUSPENDED);
+            }
+            throw new BusinessException(ErrorCode.PRODUCT_NOT_PURCHASABLE,
+                    "지금 구매할 수 없는 상품입니다: " + productNameBySellerUser.get(row.getId()));
+        }
     }
 
     /**

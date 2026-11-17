@@ -120,7 +120,8 @@ class SellerWithdrawDbTest {
      * 주문(상품 id 오름차순으로 잠금)과 판매자 탈퇴가 같은 순간에 와도 데드락 없이 하나씩 처리된다.
      * 데이터를 일부러 "브랜드 순서 ≠ 상품 id 순서"로 만든다: 먼저 만든 브랜드(A)에 나중 상품이 들어 있다.
      * 탈퇴가 브랜드 인덱스 순서로 잠그면 주문과 잠그는 순서가 엇갈려 데드락이 날 수 있는 조건이다.
-     * 결과는 둘 중 하나여야 한다: 주문이 먼저 끝나 주문 성공, 또는 탈퇴가 먼저 끝나 PRODUCT_NOT_PURCHASABLE.
+     * 결과는 둘 중 하나여야 한다: 탈퇴가 먼저 끝나 주문이 모두 PRODUCT_NOT_PURCHASABLE, 또는 주문이 먼저 끝나
+     * 탈퇴가 HAS_IN_PROGRESS_ORDERS (진행 중인 주문이 있으면 탈퇴 불가) — 어느 쪽이든 데드락은 없어야 한다.
      */
     @Test
     void 주문과_판매자_탈퇴가_동시에_와도_데드락_없이_처리된다() throws Exception {
@@ -151,14 +152,29 @@ class SellerWithdrawDbTest {
 
             List<String> outcomes = runTogether(tasks);
 
-            assertThat(outcomes.get(buyersPerRound)).as("탈퇴 (round %d)", round).isEqualTo("OK");
-            assertThat(outcomes.subList(0, buyersPerRound)).as("주문 (round %d)", round)
+            // 진행 중인 주문이 있으면 탈퇴할 수 없다 (팀 결정 2026-11-17). 그래서 결과는 둘 중 하나다:
+            //  - 탈퇴가 먼저: 탈퇴 OK, 주문은 전부 PRODUCT_NOT_PURCHASABLE
+            //  - 주문이 하나라도 먼저: 탈퇴 HAS_IN_PROGRESS_ORDERS(상품 판매 종료까지 롤백), 계정·상품 그대로
+            String withdrawOutcome = outcomes.get(buyersPerRound);
+            List<String> orderOutcomes = outcomes.subList(0, buyersPerRound);
+            long ordered = orderOutcomes.stream().filter("OK"::equals).count();
+            assertThat(orderOutcomes).as("주문 (round %d)", round)
                     .isSubsetOf("OK", ErrorCode.PRODUCT_NOT_PURCHASABLE.name());
-            assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String.class, user))
-                    .isEqualTo("WITHDRAWN");
-            assertThat(jdbc.queryForList("SELECT status FROM products WHERE id IN (?, ?)", String.class, first, second))
-                    .containsOnly("DELETED");
-            long ordered = outcomes.subList(0, buyersPerRound).stream().filter("OK"::equals).count();
+            if (withdrawOutcome.equals("OK")) {
+                assertThat(ordered).as("탈퇴가 먼저면 주문 0건 (round %d)", round).isZero();
+                assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String.class, user))
+                        .isEqualTo("WITHDRAWN");
+                assertThat(jdbc.queryForList("SELECT status FROM products WHERE id IN (?, ?)", String.class,
+                        first, second)).containsOnly("DELETED");
+            } else {
+                assertThat(withdrawOutcome).as("탈퇴 (round %d)", round)
+                        .isEqualTo(ErrorCode.HAS_IN_PROGRESS_ORDERS.name());
+                assertThat(ordered).as("주문이 먼저면 주문 1건 이상 (round %d)", round).isPositive();
+                assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String.class, user))
+                        .isEqualTo("ACTIVE");
+                assertThat(jdbc.queryForList("SELECT status FROM products WHERE id IN (?, ?)", String.class,
+                        first, second)).containsOnly("ON_SALE");
+            }
             assertThat(jdbc.queryForObject("SELECT stock_quantity FROM product_options WHERE id = ?", Integer.class,
                     firstOption)).isEqualTo(100 - (int) ordered);
         }

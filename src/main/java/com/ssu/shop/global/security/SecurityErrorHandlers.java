@@ -23,7 +23,11 @@ public class SecurityErrorHandlers {
     private final ObjectMapper objectMapper;
 
     public AuthenticationEntryPoint entryPoint() {
-        return (request, response, ex) -> write(response, ErrorCode.UNAUTHORIZED);
+        // 토큰은 맞지만 다른 곳에서 새로 로그인했거나 비밀번호를 바꿔 끊긴 경우는 그 이유로 응답 (JwtAuthenticationFilter)
+        return (request, response, ex) -> {
+            Object reason = request.getAttribute(JwtAuthenticationFilter.AUTH_ERROR_ATTRIBUTE);
+            write(response, reason instanceof ErrorCode code ? code : ErrorCode.UNAUTHORIZED);
+        };
     }
 
     public AccessDeniedHandler accessDeniedHandler() {

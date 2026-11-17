@@ -150,6 +150,47 @@ class OrderServiceTest {
     }
 
     @Test
+    void 정지된_판매자의_상품이_있으면_주문_전체를_거부하고_회원을_상품보다_먼저_잠근다() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
+        CartItem cap = cartItem(sellerB, "모자", 19_000, ProductStatus.ON_SALE, 1);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee, cap));
+        when(userRepository.lockStatuses(java.util.Set.of(BUYER, 1L, 2L)))
+                .thenReturn(List.of(statusRow(1L, "ACTIVE"), statusRow(2L, "SUSPENDED"), statusRow(BUYER, "ACTIVE")));
+
+        assertThatThrownBy(() -> orderService.create(BUYER, REQUEST))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("모자")
+                .extracting("errorCode").isEqualTo(ErrorCode.PRODUCT_NOT_PURCHASABLE);
+        verify(stockService, org.mockito.Mockito.never()).lock(anyList());
+        verify(orderRepository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void 주문하는_사이_구매자가_정지되면_ACCOUNT_SUSPENDED() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee));
+        when(userRepository.lockStatuses(java.util.Set.of(BUYER, 1L)))
+                .thenReturn(List.of(statusRow(1L, "ACTIVE"), statusRow(BUYER, "SUSPENDED")));
+
+        assertThatThrownBy(() -> orderService.create(BUYER, REQUEST))
+                .extracting("errorCode").isEqualTo(ErrorCode.ACCOUNT_SUSPENDED);
+    }
+
+    private static com.ssu.shop.domain.user.repository.UserRepository.UserStatusRow statusRow(Long id, String status) {
+        return new com.ssu.shop.domain.user.repository.UserRepository.UserStatusRow() {
+            @Override
+            public Long getId() {
+                return id;
+            }
+
+            @Override
+            public String getStatus() {
+                return status;
+            }
+        };
+    }
+
+    @Test
     void 상품을_id_순서로_잠근_뒤에_옵션을_잠근다() {
         CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
         CartItem cap = cartItem(sellerB, "모자", 19_000, ProductStatus.ON_SALE, 1);

@@ -7,7 +7,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - 요구사항: [`docs/명세서.md`](docs/명세서.md)
 - API 문서: 앱 실행 후 http://localhost:8080/swagger-ui.html
 
-목차: [작업 현황](#작업-현황-트랙별) · [1. 실행](#1-실행) · [2. 테스트](#2-테스트) · [3. 패키지 구조](#3-패키지-구조) · [4. DB 설계](#4-db-설계) · [5. 인덱스와 실행 계획](#5-인덱스와-실행-계획-explain) · [6. 변경 이력과 남은 작업](#6-변경-이력과-남은-작업) · [7. AWS 배포 가이드](#7-aws-배포-가이드-ec2--docker-compose)
+목차: [작업 현황](#작업-현황-트랙별) · [1. 실행](#1-실행) · [2. 테스트](#2-테스트) · [3. 패키지 구조](#3-패키지-구조) · [4. DB 설계](#4-db-설계) · [5. 인덱스와 실행 계획](#5-인덱스와-실행-계획-explain) · [6. 변경 이력과 남은 작업](#6-변경-이력과-남은-작업) · [7. AWS 배포 가이드](#7-aws-배포-가이드-ec2--docker-compose) · [8. 계정 관리 규칙](#8-계정-관리-규칙-2026-11-17)
 
 ---
 
@@ -20,7 +20,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 | --- | --- | --- | --- |
 | [A. 공통 기반·인프라](#a-공통-기반인프라) | BE-1 | 8 / 10 | 🔶 샘플 이미지·실제 AWS 배포 남음 |
 | [B. DB 설계·데이터](#b-db-설계데이터) | BE-1 | 6 / 6 | ✅ 완료 |
-| [C. 회원·판매자](#c-회원판매자) | BE-1 | 5 / 5 | ✅ 완료 |
+| [C. 회원·판매자](#c-회원판매자) | BE-1 | 6 / 6 | ✅ 완료 |
 | [D. 브랜드·상품](#d-브랜드상품) | BE-1 | 5 / 5 | ✅ 완료 |
 | [E. 좋아요](#e-좋아요) | BE-1 | 3 / 3 | ✅ 완료 |
 | [F. 재고](#f-재고) | BE-2 | 3 / 3 | ✅ 완료 |
@@ -44,7 +44,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [ ] 실제 AWS 배포 (7장대로) — 팀원
 
 ### B. DB 설계·데이터
-- [x] 스키마 V1~V5 (테이블 14개, 제약조건, V5 = 판매자 상태별 배송 인덱스), DB 제약 테스트 18개
+- [x] 스키마 V1~V6 (테이블 14개, 제약조건, V5 = 판매자 상태별 배송 인덱스, V6 = 동시 로그인 방지 컬럼), DB 제약 테스트 18개
 - [x] 시연 데이터: 회원·판매자·브랜드·상품 27개와 옵션·좋아요
 - [x] ERD·설계 근거 정리 (4장), 명세서 DB 확정안
 - [x] 시연 주문 데이터 (90일치, `R__demo_orders.sql`) + 정합성 검사 15종 (`scripts/check-integrity.sql`)
@@ -57,6 +57,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [x] 관리자 회원 목록, 정지·해제, 탈퇴 처리
 - [x] 판매자 탈퇴 수정 (11-17): 계정 탈퇴가 저장되지 않던 버그, 주문과 동시에 오면 데드락이 나던 잠금 순서 (`SellerWithdrawDbTest`)
 - [x] 같은 이메일 동시 가입 테스트
+- [x] 계정 관리 (11-17 팀 결정): 진행 중 주문이 있으면 정지·탈퇴 불가, 정지된 판매자 상품 주문 불가, 본인 탈퇴, 마이페이지 수정·비밀번호 변경, 동시 로그인 방지 (V6, [8장](#8-계정-관리-규칙-2026-11-17), `AccountRulesDbTest`)
 
 ### D. 브랜드·상품
 - [x] 브랜드 등록, 관리자 승인·거절(사유), 브랜드 페이지
@@ -183,7 +184,8 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
 - **DB 테스트**는 `DB_TEST_URL`이 있을 때만 실행됩니다: DB 제약 검증 18개(`SchemaConstraintTest`), 통계 SQL 7개(`StatsQueryTest`: 취소 제외, 주·월 묶음, 자정 경계), 같은 이메일 동시 가입 10건(`ConcurrentSignupTest`).
   - BE-2 추가: 재고 변경·동시성·롤백 7개(`StockServiceDbTest`), 장바구니·판매자 재고 API 12개(`CartStockApiDbTest`), 주문 생성·동시성·장바구니 변경 충돌·판매자 상품 변경과의 경합 13개(`OrderCreateDbTest`), 주문 조회·취소·구매확정·판매자 배송 관리 7개(`OrderManageDbTest`).
   - 판매자 탈퇴 2개(`SellerWithdrawDbTest`): 탈퇴가 실제로 커밋되는지, 주문과 동시에 와도 데드락이 없는지(10라운드).
-- 현재 테스트는 메서드 기준 총 **154개**(단위·보안 **87개**, DB **67개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
+  - 계정 관리 10개(`AccountRulesDbTest`): 진행 중 주문이 있을 때 정지·탈퇴 거절(상태별), 정지된 판매자 상품 주문 거절, 본인 탈퇴(구매자·판매자), 주문과 정지가 동시에 올 때(구매자·판매자 각 10라운드), 동시 로그인·마이페이지·비밀번호 변경(HTTP).
+- 현재 테스트는 메서드 기준 총 **172개**(단위·보안 **95개**, DB **77개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
 
 ```powershell
 # PowerShell (Docker DB 기준. 직접 설치한 MySQL이면 3307)
@@ -231,7 +233,8 @@ src/main/resources
 │   ├── V2__seed_categories.sql             최초 카테고리 (V4에서 교체)
 │   ├── V3__tune_product_list_indexes.sql   상품 목록 인덱스 개선 (5장)
 │   ├── V4__fashion_mall_redesign.sql       패션몰 재설계 (6장) — 현재 스키마
-│   └── V5__shipments_seller_status_index.sql  판매자 상태별 배송 인덱스 (5.5)
+│   ├── V5__shipments_seller_status_index.sql  판매자 상태별 배송 인덱스 (5.5)
+│   └── V6__users_login_session.sql         동시 로그인 방지용 로그인 식별값 (8장)
 ├── db/demo
 │   ├── R__demo_data.sql                    시연 데이터: 회원·브랜드·상품·좋아요 (local 프로필만)
 │   └── R__demo_orders.sql                  시연 주문 90일치 (local 프로필만)
@@ -558,6 +561,8 @@ V4 스키마에 대량 데이터를 넣고 `EXPLAIN ANALYZE`로 실제 실행을
 | 11-11 | 좋아요 API (트랙 E) | 회의 결정: 내가 좋아요 누른 상품 목록 |
 | 11-11 | 시연 주문 90일치 `R__demo_orders.sql`, 정합성 검사 15종 `scripts/check-integrity.sql` (트랙 B) | 통계 시연, 재고·주문 정합성 확인 |
 | 11-11 | 판매 통계 API + **V5** `shipments(seller_id, status, created_at)` (트랙 I) | 통계 쿼리 EXPLAIN 결과 (5.5) |
+| 11-17 | AWS 배포 구성 (`docker-compose.prod.yml`, 7장) | 서버 배포 |
+| 11-17 | 계정 관리 + **V6** `users.login_session_id` (트랙 C, 8장) | 팀 결정: 진행 중 주문 보호, 본인 탈퇴, 마이페이지, 동시 로그인 방지 |
 
 **V4 변경 내용 (2026-11-10 회의)**
 
@@ -734,3 +739,61 @@ docker exec -i shop-mysql sh -c 'mysql --default-character-set=utf8mb4 -ushop -p
 | 앱이 계속 재시작 | `$C logs app`. `Access denied`면 7.9 DB 비밀번호 |
 | 프론트에서 CORS 오류 | `CORS_ALLOWED_ORIGINS`가 브라우저 주소창의 프론트 주소(스킴·포트 포함)와 정확히 같은지. 바꾼 뒤 `$C up -d` |
 | `!override` / `!reset` 문법 오류 | `docker compose version`이 2.24 미만 → 7.2의 공식 스크립트로 다시 설치 |
+
+---
+
+## 8. 계정 관리 규칙 (2026-11-17)
+
+팀에서 정한 내용입니다. 요구사항 원문은 [`docs/명세서.md`](docs/명세서.md)의 "팀 결정 (2026-11-17)"에 있습니다.
+**진행 중인 주문**은 배송 묶음(shipments)이 주문완료·배송준비·배송중인 것입니다. 배송완료·구매확정·취소는 끝난 주문으로 봅니다.
+
+### 8.1 규칙
+
+| 상황 | 동작 |
+| --- | --- |
+| 관리자가 구매자·판매자를 정지·탈퇴 | 진행 중인 주문이 있으면 거절 → 409 `HAS_IN_PROGRESS_ORDERS` (message에 건수). 정지 해제는 항상 가능 |
+| 정지된 판매자의 상품 | 목록에는 보이지만 주문은 거절 (`PRODUCT_NOT_PURCHASABLE`). 해제하면 다시 주문 가능 |
+| 구매자 본인 탈퇴 | 진행 중인 주문이 있어도 확인 후 탈퇴. 주문은 남고 배송은 판매자가 계속 진행 |
+| 판매자 본인 탈퇴 | 진행 중인 주문이 있으면 거절. 탈퇴하면 상품 모두 판매 종료 |
+| 본인 탈퇴 확인 | 비밀번호를 다시 입력 (틀리면 400 `PASSWORD_MISMATCH`) |
+| 마이페이지 수정 | 모든 회원: 이름·전화번호·비밀번호. 판매자: 상호·대표자명 (사업자번호는 고정) |
+| 비밀번호 변경 | 바꾸면 지금 로그인도 끊김 → 다음 요청 401 `LOGIN_EXPIRED`, 새 비밀번호로 다시 로그인 |
+| 동시 로그인 | 다른 곳에서 새로 로그인하면 먼저 로그인한 쪽의 토큰이 끊김 → 401 `LOGGED_IN_ELSEWHERE` |
+
+### 8.2 API
+
+| Method | Endpoint | 설명 |
+| --- | --- | --- |
+| GET | `/api/users/me` | 계정 정보: email(계정명)·name·phone·role·status·createdAt, 판매자면 `seller`(상호·대표자명·사업자번호) |
+| PATCH | `/api/users/me` | `{"name", "phone", "seller": {"companyName", "representativeName"}}` — seller는 판매자만, 판매자는 필수. phone을 비우면 삭제 |
+| PATCH | `/api/users/me/password` | `{"currentPassword", "newPassword"}` (새 비밀번호 8~64자) |
+| GET | `/api/users/me/withdrawal` | 탈퇴 버튼을 누르면 먼저 호출 → `{"canWithdraw", "inProgressOrderCount", "message"}`. message를 팝업에 그대로 표시 |
+| POST | `/api/users/me/withdrawal` | `{"password"}` → 탈퇴. 성공하면 토큰을 지우고 첫 화면으로 |
+
+### 8.3 프론트에서 처리할 것
+
+- 모든 API 응답이 401이고 `error.code`가 `LOGGED_IN_ELSEWHERE`면 "다른 곳에서 로그인되어 로그아웃되었습니다" 팝업 → 토큰 삭제 → 로그인 화면. `LOGIN_EXPIRED`도 토큰 삭제 → 로그인 화면 (axios 응답 인터셉터 한 곳에서 처리하면 됩니다).
+- 관리자 회원 관리에서 정지·탈퇴가 409 `HAS_IN_PROGRESS_ORDERS`면 `error.message`를 팝업으로.
+- 탈퇴: `GET /api/users/me/withdrawal` → `canWithdraw`가 true면 message + 비밀번호 입력 칸 + 탈퇴 버튼, false면 message만.
+- 주문서 우편번호 칸에 "숫자 5자리" 안내 문구 (서버는 숫자 5자리만 받습니다).
+
+### 8.4 동시에 들어온 요청 처리
+
+관리자가 정지를 누르는 순간 그 회원이 주문을 하면, 서로 먼저 확인한 값만 믿고 둘 다 성공할 수 있습니다. 그러면 "진행 중인 주문이 있는 정지 회원"이 생깁니다. 이를 회원 행 잠금으로 막습니다 (`AccountLifecycle`, `OrderService.lockAccounts`).
+
+| 처리 | 잠그는 순서 |
+| --- | --- |
+| 주문 | 구매자·판매자 회원 행 `FOR SHARE`(id 오름차순) → 상품 `FOR SHARE` → 옵션 `FOR UPDATE` |
+| 관리자 정지 | 대상 회원 행 `FOR UPDATE` → 진행 중 주문 수를 잠금 읽기(`FOR SHARE`)로 셈 |
+| 판매자 탈퇴 | 판매자 회원 행 `FOR UPDATE` → 상품을 id 오름차순으로 판매 종료 → 진행 중 주문 수를 잠금 읽기로 셈 (있으면 판매 종료까지 롤백) |
+
+- 주문이 먼저 회원 행을 잠갔으면 정지는 그 주문이 끝날 때까지 기다렸다가 그 주문까지 세어 거절합니다. 정지가 먼저면 주문이 기다렸다가 바뀐 상태를 보고 거절됩니다.
+- 진행 중 주문 수를 일반 SELECT로 세면, MySQL은 트랜잭션이 처음 읽은 시점의 값을 보여 줍니다. 그러면 기다리는 사이 커밋된 주문을 못 볼 수 있어서 잠금 읽기로 셉니다.
+- 모두 회원 → 상품 순서로 잠그므로 서로 기다리다 멈추지(데드락) 않습니다.
+- `AccountRulesDbTest`가 주문과 정지를 같은 순간에 출발시켜 10라운드씩 확인합니다. 결과는 항상 "주문 성공 + 정지 거절" 또는 "정지 성공 + 주문 거절" 중 하나였습니다. `SellerWithdrawDbTest`는 주문과 판매자 탈퇴의 경합을 확인합니다.
+
+### 8.5 동시 로그인 방지 (V6)
+
+- `users.login_session_id`(CHAR(36))에 지금 유효한 로그인 하나의 UUID를 저장하고, 같은 값을 JWT의 `sid` 클레임에 넣습니다.
+- JWT 필터는 원래 요청마다 회원을 PK로 한 번 읽고 있었습니다(정지 즉시 반영용). 그 행으로 `sid`도 비교하므로 **추가 쿼리는 없습니다**.
+- 비밀번호 변경·탈퇴 때는 값을 NULL로 지워 모든 토큰을 끊습니다. V6 전에 발급된 토큰(`sid` 없음)은 401이 되므로 배포 후 한 번 다시 로그인하면 됩니다.

@@ -34,13 +34,15 @@ public class AuthController {
         return ApiResponse.success(authService.signup(request));
     }
 
-    @Operation(summary = "로그인 (JWT 발급)")
+    @Operation(summary = "로그인 (JWT 발급)",
+            description = "동시 로그인 방지: 새로 로그인하면 이전에 받은 토큰은 바로 무효 (그 토큰으로 요청하면 401 LOGGED_IN_ELSEWHERE)")
     @PostMapping("/api/auth/login")
     public ApiResponse<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success(authService.login(request));
     }
 
-    @Operation(summary = "내 정보 + role (판매자 신청 상태 포함)")
+    @Operation(summary = "내 정보 (마이페이지 계정 확인)",
+            description = "email(로그인 계정명)·이름·전화번호·role·status·가입일. 판매자면 seller(상호·대표자명·사업자번호)")
     @GetMapping("/api/users/me")
     public ApiResponse<MeResponse> me(@AuthenticationPrincipal LoginUser loginUser) {
         return ApiResponse.success(authService.me(loginUser.id()));
