@@ -51,4 +51,37 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
              where s.id = :id and s.status = com.ssu.shop.domain.order.entity.ShipmentStatus.DELIVERED
             """)
     int confirm(@Param("id") Long id, @Param("now") LocalDateTime now);
+
+    // ----- 진행 중인 주문 (주문완료·배송준비·배송중) 수: 회원 정지·탈퇴 판단용 (팀 결정) -----
+    // 배송완료(DELIVERED)는 진행 중으로 보지 않는다. 구매확정·취소도 끝난 주문이다.
+    // *ForUpdate 는 잠금 읽기(FOR SHARE)라 트랜잭션의 스냅숏이 아니라 커밋된 최신 행을 센다.
+    // 사용 이유와 잠금 순서는 AccountLifecycle 주석 참고.
+
+    /** 구매자 기준. idx_orders_user_created → uk_shipments_order_seller 로 그 회원의 주문만 읽는다 */
+    @Query(value = """
+            SELECT COUNT(*) FROM shipments s JOIN orders o ON o.id = s.order_id
+             WHERE o.user_id = :userId AND s.status IN ('ORDERED', 'PREPARING', 'SHIPPING')
+            """, nativeQuery = true)
+    long countInProgressByBuyer(@Param("userId") Long userId);
+
+    @Query(value = """
+            SELECT COUNT(*) FROM shipments s JOIN orders o ON o.id = s.order_id
+             WHERE o.user_id = :userId AND s.status IN ('ORDERED', 'PREPARING', 'SHIPPING')
+               FOR SHARE
+            """, nativeQuery = true)
+    long countInProgressByBuyerForUpdate(@Param("userId") Long userId);
+
+    /** 판매자 기준. V5 idx_shipments_seller_status_created 로 그 판매자의 진행 중 묶음만 읽는다 */
+    @Query(value = """
+            SELECT COUNT(*) FROM shipments
+             WHERE seller_id = :sellerId AND status IN ('ORDERED', 'PREPARING', 'SHIPPING')
+            """, nativeQuery = true)
+    long countInProgressBySeller(@Param("sellerId") Long sellerId);
+
+    @Query(value = """
+            SELECT COUNT(*) FROM shipments
+             WHERE seller_id = :sellerId AND status IN ('ORDERED', 'PREPARING', 'SHIPPING')
+               FOR SHARE
+            """, nativeQuery = true)
+    long countInProgressBySellerForUpdate(@Param("sellerId") Long sellerId);
 }

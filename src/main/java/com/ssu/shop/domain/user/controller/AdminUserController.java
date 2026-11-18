@@ -44,7 +44,8 @@ public class AdminUserController {
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))));
     }
 
-    @Operation(summary = "회원 정지 / 해제 (ACTIVE | SUSPENDED)")
+    @Operation(summary = "회원 정지 / 해제 (ACTIVE | SUSPENDED)",
+            description = "진행 중인 주문(주문완료·배송준비·배송중)이 있으면 정지 불가 → 409 HAS_IN_PROGRESS_ORDERS (message 를 팝업에 표시). 해제는 항상 가능")
     @PatchMapping("/{userId}/status")
     public ApiResponse<AdminUserResponse> changeStatus(@PathVariable Long userId,
                                                        @Valid @RequestBody UserStatusChangeRequest request) {
@@ -52,7 +53,8 @@ public class AdminUserController {
     }
 
     @Operation(summary = "회원 탈퇴 처리",
-            description = "개인정보를 지우고 로그인을 막는다. 주문 기록은 남는다. 판매자면 상품도 판매 종료")
+            description = "개인정보를 지우고 로그인을 막는다. 주문 기록은 남는다. 판매자면 상품도 판매 종료. "
+                    + "진행 중인 주문(주문완료·배송준비·배송중)이 있으면 불가 → 409 HAS_IN_PROGRESS_ORDERS")
     @DeleteMapping("/{userId}")
     public ApiResponse<AdminUserResponse> withdraw(@PathVariable Long userId) {
         return ApiResponse.success(adminUserService.withdraw(userId));

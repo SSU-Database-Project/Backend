@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -56,6 +57,13 @@ public class User extends BaseTimeEntity {
     @Column(name = "withdrawn_at")
     private LocalDateTime withdrawnAt;
 
+    /**
+     * 지금 유효한 로그인 하나의 식별값 (동시 로그인 방지, V6). JWT 의 sid 클레임과 같아야 인증된다.
+     * NULL 이면 유효한 로그인이 없다 (아직 로그인 전, 비밀번호 변경 후, 탈퇴 후).
+     */
+    @Column(name = "login_session_id", length = 36, columnDefinition = "char(36)")
+    private String loginSessionId;
+
     private User(String email, String encodedPassword, String name, String phone, Role role) {
         this.email = email;
         this.password = encodedPassword;
@@ -97,6 +105,25 @@ public class User extends BaseTimeEntity {
         this.phone = null;
         this.status = UserStatus.WITHDRAWN;
         this.withdrawnAt = LocalDateTime.now();
+        this.loginSessionId = null;
+    }
+
+    /** 로그인: 새 식별값을 만든다. 이전에 발급한 토큰은 sid 가 달라져 더 이상 인증되지 않는다. */
+    public String startNewLoginSession() {
+        this.loginSessionId = UUID.randomUUID().toString();
+        return loginSessionId;
+    }
+
+    /** 마이페이지 정보 수정. phone 이 null 이면 번호를 지운다. */
+    public void updateProfile(String name, String phone) {
+        this.name = name;
+        this.phone = phone;
+    }
+
+    /** 비밀번호 변경: 지금 쓰던 토큰을 포함해 모든 로그인을 끊는다 → 새 비밀번호로 다시 로그인 */
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+        this.loginSessionId = null;
     }
 
     public boolean isActive() {
