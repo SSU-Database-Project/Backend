@@ -67,6 +67,15 @@ public class DbFixtures {
                  JOIN brands b ON b.id = p.brand_id
                 WHERE b.name LIKE ?""";
         jdbc.update("DELETE h FROM stock_history h JOIN product_options o ON o.id = h.option_id" + optionsOfTag, brands);
+        // 결제·환불 (V7): 주문 라인·배송 묶음·주문보다 먼저
+        jdbc.update("""
+                DELETE r FROM payment_refunds r
+                  JOIN payments p ON p.id = r.payment_id
+                  JOIN orders d ON d.id = p.order_id
+                  JOIN users u ON u.id = d.user_id
+                 WHERE u.email LIKE ?""", users);
+        jdbc.update("DELETE p FROM payments p JOIN orders d ON d.id = p.order_id JOIN users u ON u.id = d.user_id "
+                + "WHERE u.email LIKE ?", users);
         jdbc.update("DELETE i FROM order_items i JOIN product_options o ON o.id = i.option_id" + optionsOfTag, brands);
         jdbc.update("""
                 DELETE s FROM shipments s

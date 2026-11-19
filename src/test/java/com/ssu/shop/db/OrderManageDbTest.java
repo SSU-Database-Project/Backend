@@ -240,7 +240,7 @@ class OrderManageDbTest {
     // ===== 목록: 순서·필터·쿼리 수 =====
 
     @Test
-    void 내_주문_목록은_최신순이고_주문이_몇_건이든_쿼리는_3번_이하다() {
+    void 내_주문_목록은_최신순이고_주문이_몇_건이든_쿼리는_5번_이하다() {
         List<Long> created = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
             created.add(order(buyer, teeBlack, 1, capBlack, 1).orderId()); // 주문마다 배송 묶음 2개
@@ -253,7 +253,7 @@ class OrderManageDbTest {
 
         long queries = stats.getPrepareStatementCount();
         stats.setStatisticsEnabled(false);
-        assertThat(queries).isLessThanOrEqualTo(3); // 주문 페이지 + 전체 건수 + 주문 줄
+        assertThat(queries).isLessThanOrEqualTo(5); // 주문 페이지 + 전체 건수 + 주문 줄 + 결제 + 환불 (V7)
         assertThat(page.totalElements()).isEqualTo(6);
         assertThat(page.content()).extracting(OrderResponse::orderId)
                 .containsExactly(created.get(5), created.get(4), created.get(3), created.get(2)); // 나중 주문이 먼저

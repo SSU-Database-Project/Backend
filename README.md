@@ -7,7 +7,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - 요구사항: [`docs/명세서.md`](docs/명세서.md)
 - API 문서: 앱 실행 후 http://localhost:8080/swagger-ui.html
 
-목차: [작업 현황](#작업-현황-트랙별) · [1. 실행](#1-실행) · [2. 테스트](#2-테스트) · [3. 패키지 구조](#3-패키지-구조) · [4. DB 설계](#4-db-설계) · [5. 인덱스와 실행 계획](#5-인덱스와-실행-계획-explain) · [6. 변경 이력과 남은 작업](#6-변경-이력과-남은-작업) · [7. AWS 배포 가이드](#7-aws-배포-가이드-ec2--docker-compose) · [8. 계정 관리 규칙](#8-계정-관리-규칙-2026-11-17)
+목차: [작업 현황](#작업-현황-트랙별) · [1. 실행](#1-실행) · [2. 테스트](#2-테스트) · [3. 패키지 구조](#3-패키지-구조) · [4. DB 설계](#4-db-설계) · [5. 인덱스와 실행 계획](#5-인덱스와-실행-계획-explain) · [6. 변경 이력과 남은 작업](#6-변경-이력과-남은-작업) · [7. AWS 배포 가이드](#7-aws-배포-가이드-ec2--docker-compose) · [8. 계정 관리 규칙](#8-계정-관리-규칙-2026-11-17) · [9. 모의 결제](#9-모의-결제-2026-11-19)
 
 ---
 
@@ -25,7 +25,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 | [E. 좋아요](#e-좋아요) | BE-1 | 3 / 3 | ✅ 완료 |
 | [F. 재고](#f-재고) | BE-2 | 3 / 3 | ✅ 완료 |
 | [G. 장바구니](#g-장바구니) | BE-2 | 2 / 2 | ✅ 완료 |
-| [H. 주문·배송](#h-주문배송) | BE-2 | 6 / 6 | ✅ 완료 |
+| [H. 주문·배송](#h-주문배송) | BE-2 | 7 / 7 | ✅ 완료 |
 | [I. 통계](#i-통계) | BE-1 | 4 / 4 | ✅ 완료 |
 | [팀 결정](#팀-결정) | 팀 | 1 / 4 | 🔶 배포 방식 결정됨 |
 
@@ -44,7 +44,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [ ] 실제 AWS 배포 (7장대로) — 팀원
 
 ### B. DB 설계·데이터
-- [x] 스키마 V1~V6 (테이블 14개, 제약조건, V5 = 판매자 상태별 배송 인덱스, V6 = 동시 로그인 방지 컬럼), DB 제약 테스트 18개
+- [x] 스키마 V1~V7 (테이블 17개, 제약조건, V5 = 판매자 상태별 배송 인덱스, V6 = 동시 로그인 방지 컬럼, V7 = 모의 결제·환불), DB 제약 테스트 18개
 - [x] 시연 데이터: 회원·판매자·브랜드·상품 27개와 옵션·좋아요
 - [x] ERD·설계 근거 정리 (4장), 명세서 DB 확정안
 - [x] 시연 주문 데이터 (90일치, `R__demo_orders.sql`) + 정합성 검사 15종 (`scripts/check-integrity.sql`)
@@ -87,6 +87,7 @@ Spring Boot 3.5 · Java 17 · MySQL 8.0 · Flyway · Spring Security(JWT) · spr
 - [x] 내 주문 목록·상세 (판매자별 배송 상태)
 - [x] 판매자별 취소 (주문완료에서만, 재고 복원), 구매확정
 - [x] 판매자 배송 상태 변경, 확정된 주문 목록
+- [x] 모의 결제 (11-19 팀 결정): 결제수단 3종, 서버가 금액 계산·승인, 거절 시 전체 롤백, 판매자별 부분 환불 (V7, [9장](#9-모의-결제-2026-11-19), `PaymentDbTest`)
 
 ### I. 통계
 - [x] 판매자 기간별(일/주/월) 판매량·매출 (`GET /api/seller/stats/sales`, 빈 구간은 0으로 채움) + 대시보드 요약 (`/summary`)
@@ -185,7 +186,8 @@ $env:DB_URL="jdbc:mysql://localhost:3308/shop?serverTimezone=Asia/Seoul&characte
   - BE-2 추가: 재고 변경·동시성·롤백 7개(`StockServiceDbTest`), 장바구니·판매자 재고 API 12개(`CartStockApiDbTest`), 주문 생성·동시성·장바구니 변경 충돌·판매자 상품 변경과의 경합 13개(`OrderCreateDbTest`), 주문 조회·취소·구매확정·판매자 배송 관리 7개(`OrderManageDbTest`).
   - 판매자 탈퇴 2개(`SellerWithdrawDbTest`): 탈퇴가 실제로 커밋되는지, 주문과 동시에 와도 데드락이 없는지(10라운드).
   - 계정 관리 10개(`AccountRulesDbTest`): 진행 중 주문이 있을 때 정지·탈퇴 거절(상태별), 정지된 판매자 상품 주문 거절, 본인 탈퇴(구매자·판매자), 주문과 정지가 동시에 올 때(구매자·판매자 각 10라운드), 동시 로그인·마이페이지·비밀번호 변경(HTTP).
-- 현재 테스트는 메서드 기준 총 **172개**(단위·보안 **95개**, DB **77개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
+  - 모의 결제 9개(`PaymentDbTest`): 카드·계좌이체·간편결제 승인과 기록(카드는 끝 4자리만), 카드 거절·한도 초과 시 주문·재고·장바구니 전체 롤백, 판매자별 부분 환불, 같은 묶음 동시 취소 시 환불 1건, 정합성 규칙 16~21, HTTP 400·402.
+- 현재 테스트는 메서드 기준 총 **188개**(단위·보안 **102개**, DB **86개**)입니다. `ConcurrentSignupTest`는 동시 요청 10건을 검증하는 테스트 1개입니다.
 
 ```powershell
 # PowerShell (Docker DB 기준. 직접 설치한 MySQL이면 3307)
@@ -200,7 +202,7 @@ Gradle은 환경변수 변화를 입력값으로 보지 않아 이전 결과(DB 
 
 H2 대신 실제 MySQL로 테스트하는 이유: CHECK·FK·REGEXP 동작이 MySQL과 달라, H2에서 통과해도 DB 제약을 검증한 것이 아니기 때문입니다.
 
-**데이터 정합성 검사** — DB 제약으로 표현할 수 없는, 여러 행·테이블에 걸친 규칙 15가지(옵션 재고 = 마지막 재고 이력, 주문 총액 = 라인 합계, 배송 묶음의 판매자 = 옵션의 판매자 등)를 확인합니다. 모든 `bad`가 0이어야 정상입니다. 시연 데이터나 주문·재고 로직을 바꾼 뒤에 돌립니다.
+**데이터 정합성 검사** — DB 제약으로 표현할 수 없는, 여러 행·테이블에 걸친 규칙 21가지(옵션 재고 = 마지막 재고 이력, 주문 총액 = 라인 합계, 배송 묶음의 판매자 = 옵션의 판매자, 결제 금액 = 주문 총액, 환불 = 취소한 묶음 금액 등)를 확인합니다. 모든 `bad`가 0이어야 정상입니다. 시연 데이터나 주문·재고 로직을 바꾼 뒤에 돌립니다.
 
 ```bash
 mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3308 -u shop -pshop1234 shop < scripts/check-integrity.sql
@@ -234,10 +236,12 @@ src/main/resources
 │   ├── V3__tune_product_list_indexes.sql   상품 목록 인덱스 개선 (5장)
 │   ├── V4__fashion_mall_redesign.sql       패션몰 재설계 (6장) — 현재 스키마
 │   ├── V5__shipments_seller_status_index.sql  판매자 상태별 배송 인덱스 (5.5)
-│   └── V6__users_login_session.sql         동시 로그인 방지용 로그인 식별값 (8장)
+│   ├── V6__users_login_session.sql         동시 로그인 방지용 로그인 식별값 (8장)
+│   └── V7__payments.sql                    모의 결제·부분 환불 (9장)
 ├── db/demo
 │   ├── R__demo_data.sql                    시연 데이터: 회원·브랜드·상품·좋아요 (local 프로필만)
-│   └── R__demo_orders.sql                  시연 주문 90일치 (local 프로필만)
+│   ├── R__demo_orders.sql                  시연 주문 90일치 (local 프로필만)
+│   └── R__demo_payments.sql                시연 주문의 결제·환불 기록 (local 프로필만, 9장)
 └── static/images/samples                   시연용 샘플 이미지
 ```
 
@@ -563,6 +567,7 @@ V4 스키마에 대량 데이터를 넣고 `EXPLAIN ANALYZE`로 실제 실행을
 | 11-11 | 판매 통계 API + **V5** `shipments(seller_id, status, created_at)` (트랙 I) | 통계 쿼리 EXPLAIN 결과 (5.5) |
 | 11-17 | AWS 배포 구성 (`docker-compose.prod.yml`, 7장) | 서버 배포 |
 | 11-17 | 계정 관리 + **V6** `users.login_session_id` (트랙 C, 8장) | 팀 결정: 진행 중 주문 보호, 본인 탈퇴, 마이페이지, 동시 로그인 방지 |
+| 11-19 | 모의 결제 + **V7** `payments`, `payment_refunds`, 정합성 규칙 16~21 (트랙 H, 9장) | 팀 결정: "결제 버튼만 누르면 완료"인 시나리오를 실제 쇼핑몰 흐름으로 |
 
 **V4 변경 내용 (2026-11-10 회의)**
 
@@ -797,3 +802,54 @@ docker exec -i shop-mysql sh -c 'mysql --default-character-set=utf8mb4 -ushop -p
 - `users.login_session_id`(CHAR(36))에 지금 유효한 로그인 하나의 UUID를 저장하고, 같은 값을 JWT의 `sid` 클레임에 넣습니다.
 - JWT 필터는 원래 요청마다 회원을 PK로 한 번 읽고 있었습니다(정지 즉시 반영용). 그 행으로 `sid`도 비교하므로 **추가 쿼리는 없습니다**.
 - 비밀번호 변경·탈퇴 때는 값을 NULL로 지워 모든 토큰을 끊습니다. V6 전에 발급된 토큰(`sid` 없음)은 401이 되므로 배포 후 한 번 다시 로그인하면 됩니다.
+
+---
+
+## 9. 모의 결제 (2026-11-19)
+
+"결제 버튼만 누르면 완료"인 시나리오를 실제 쇼핑몰 흐름에 가깝게 바꿨습니다. 실제 돈은 오가지 않고, 서버 안의 **모의 결제사**(`MockPaymentGateway`)가 승인합니다. 실제 PG를 붙일 때는 `PaymentGateway` 구현만 바꾸면 됩니다.
+
+### 9.1 흐름과 규칙
+
+| 단계 | 내용 |
+| --- | --- |
+| 주문 + 결제 | `POST /api/orders` 한 번에 주문 생성 → 재고 차감 → 장바구니 정리 → **결제 승인**까지 한 트랜잭션 |
+| 금액 | 클라이언트는 금액을 보내지 않는다. 서버가 잠금 후 다시 읽은 가격으로 계산한 주문 총액으로 승인 → 화면에서 금액 조작 불가 |
+| 결제수단 | `CARD`(카드번호 16자리, 끝 4자리만 저장) · `BANK_TRANSFER` · `EASY_PAY` |
+| 거절 (시연용) | 카드번호가 `0000`으로 끝나면 카드사 거절, 결제 금액이 100만 원을 넘으면 한도 초과 → 402 `PAYMENT_DECLINED`, **주문·재고·장바구니 모두 그대로** |
+| 취소 = 부분 환불 | 판매자별 배송 묶음을 취소하면 그 묶음 금액만큼 환불 기록. 같은 묶음은 한 번만 환불(`uk_payment_refunds_shipment` + 조건부 UPDATE) |
+| 예전 주문 | V7 이전 주문은 결제가 없다(`payment: null`). 시연 주문 300건은 `R__demo_payments.sql`이 결제·환불을 채운다 |
+
+### 9.2 DB (V7)
+
+| 테이블 | 관계 | 주요 컬럼 · 제약 |
+| --- | --- | --- |
+| `payments` | orders 1 : 1 (`uk_payments_order`) | method, amount, card_last4, approval_no(UK), paid_at · CHECK: 수단 값, 금액 ≥ 0, 카드 결제 ⇔ 끝 4자리 있음(숫자 4자리) |
+| `payment_refunds` | payments 1 : N, shipments 1 : 0..1 (`uk_payment_refunds_shipment`) | amount, refunded_at · CHECK: 금액 ≥ 0 |
+
+- 결제 상태(부분 환불·전액 환불)는 저장하지 않고 환불 합계로 계산합니다. 같은 사실을 두 곳에 두지 않기 위해서입니다(3NF).
+- 정합성 규칙 16~21(`scripts/check-integrity.sql`): 결제 금액 = 주문 총액, 결제 시각 = 주문 시각, 취소된 묶음마다 환불 1건, 환불 금액 = 묶음 라인 합계, 환불은 같은 주문의 결제, 환불 합계 ≤ 결제 금액.
+- 내 주문 목록은 결제·환불까지 쿼리 5번으로 끝납니다(주문 수와 무관).
+
+### 9.3 프론트 연동 (FE 팀 전달용)
+
+**주문 요청에 `payment`가 필수입니다.** 없으면 400입니다.
+
+```json
+POST /api/orders
+{
+  "receiverName": "홍길동", "receiverPhone": "010-1234-5678",
+  "zipCode": "06978", "address": "서울특별시 동작구 상도로 369", "addressDetail": "101동",
+  "payment": { "method": "CARD", "cardNumber": "1234-5678-9012-3456" }
+}
+```
+- `method`: `CARD` / `BANK_TRANSFER` / `EASY_PAY`. `cardNumber`는 카드일 때만(16자리, 하이픈·공백 허용), 다른 수단이면 보내지 않습니다.
+- 응답과 `GET /api/orders`, `GET /api/orders/{id}`의 각 주문에 `payment`가 붙습니다.
+  ```json
+  "payment": { "paymentId": 1, "method": "CARD", "amount": 97900, "cardNumberMasked": "****-****-****-3456",
+               "approvalNo": "MOCK-20261119-52F5BC8C", "paidAt": "...", "refundedAmount": 45900, "balance": 52000,
+               "refunds": [ { "shipmentId": 519, "amount": 45900, "refundedAt": "..." } ] }
+  ```
+- 화면 흐름 제안: 주문서 → 결제수단 선택(카드면 카드번호 입력) → "결제 처리 중" → 완료 화면(주문번호·승인번호·결제 금액·판매자별 배송 묶음). 주문내역에는 결제수단·결제 금액·환불 금액·남은 금액을 표시합니다.
+- 402 `PAYMENT_DECLINED`면 `error.message`(예: "카드사에서 승인을 거절했습니다.")를 보여 주고 주문서에 머뭅니다. 장바구니는 그대로 남아 있습니다.
+- 시연 팁: 거절은 카드번호 `…-0000`, 한도 초과는 100만 원 넘게 담기.

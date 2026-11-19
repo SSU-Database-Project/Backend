@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartItemAddRequest;
 import com.ssu.shop.domain.cart.service.CartService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
+import com.ssu.shop.domain.order.dto.OrderDtos.PaymentRequest;
+import com.ssu.shop.domain.payment.entity.PaymentMethod;
 import com.ssu.shop.domain.order.service.OrderService;
 import com.ssu.shop.domain.user.dto.AccountDtos.WithdrawalCheckResponse;
 import com.ssu.shop.domain.user.entity.UserStatus;
@@ -66,7 +68,8 @@ class AccountRulesDbTest {
         return value == null ? fallback : value;
     }
 
-    static final OrderCreateRequest ORDER = new OrderCreateRequest("구매자", "01012345678", "06978", "서울", null);
+    static final OrderCreateRequest ORDER = new OrderCreateRequest("구매자", "01012345678", "06978", "서울", null,
+            new PaymentRequest(PaymentMethod.BANK_TRANSFER, null));
 
     @Autowired
     JdbcTemplate jdbc;
@@ -107,6 +110,9 @@ class AccountRulesDbTest {
     void tearDown() {
         // 탈퇴한 구매자의 주문은 이메일로 못 찾으므로 먼저 지운다
         for (Long userId : withdrawnUserIds) {
+            jdbc.update("DELETE r FROM payment_refunds r JOIN payments p ON p.id = r.payment_id "
+                    + "JOIN orders o ON o.id = p.order_id WHERE o.user_id = ?", userId);
+            jdbc.update("DELETE p FROM payments p JOIN orders o ON o.id = p.order_id WHERE o.user_id = ?", userId);
             jdbc.update("DELETE h FROM stock_history h JOIN order_items i ON i.id = h.order_item_id "
                     + "JOIN shipments s ON s.id = i.shipment_id JOIN orders o ON o.id = s.order_id WHERE o.user_id = ?",
                     userId);

@@ -23,6 +23,9 @@ public enum ErrorCode {
     LOGGED_IN_ELSEWHERE(HttpStatus.UNAUTHORIZED, "다른 곳에서 로그인되어 로그아웃되었습니다."),
     LOGIN_EXPIRED(HttpStatus.UNAUTHORIZED, "로그인 정보가 바뀌어 로그아웃되었습니다. 다시 로그인해 주세요."),
 
+    // 402 (모의 결제 승인 거절, V7)
+    PAYMENT_DECLINED(HttpStatus.PAYMENT_REQUIRED, "결제가 승인되지 않았습니다."),
+
     // 403
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
     ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "이용이 정지된 계정입니다."),
