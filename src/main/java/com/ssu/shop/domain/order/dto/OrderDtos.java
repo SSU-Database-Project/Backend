@@ -4,8 +4,13 @@ import com.ssu.shop.domain.order.entity.Order;
 import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
+import com.ssu.shop.domain.payment.entity.Payment;
+import com.ssu.shop.domain.payment.entity.PaymentMethod;
+import com.ssu.shop.domain.payment.entity.PaymentRefund;
 import com.ssu.shop.domain.product.entity.Product;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -31,7 +36,67 @@ public final class OrderDtos {
             String receiverPhone,
             @NotBlank @Pattern(regexp = "^\\d{5}$", message = "우편번호는 숫자 5자리여야 합니다.") String zipCode,
             @NotBlank @Size(max = 255) String address,
-            @Size(max = 255) String addressDetail) {
+            @Size(max = 255) String addressDetail,
+            @NotNull @Valid PaymentRequest payment) {
+    }
+
+    /**
+     * 결제 정보 (모의 결제, V7). 금액은 보내지 않는다 — 서버가 주문 총액으로 승인한다.
+     * cardNumber: 카드(CARD)일 때만, 숫자 16자리 (하이픈·공백 허용). 끝 4자리만 저장한다.
+     * 시연용 거절: 카드번호가 0000 으로 끝나거나, 금액이 100만 원을 넘으면 402 PAYMENT_DECLINED.
+     */
+    public record PaymentRequest(
+            @NotNull @Schema(allowableValues = {"CARD", "BANK_TRANSFER", "EASY_PAY"}) PaymentMethod method,
+            @Schema(example = "1234-5678-9012-3456") String cardNumber) {
+
+        @AssertTrue(message = "카드 결제는 카드번호 16자리가 필요하고, 다른 결제수단에는 카드번호를 보내지 않습니다.")
+        @Schema(hidden = true)
+        public boolean isCardNumberValid() {
+            if (method == null) {
+                return true; // @NotNull 이 따로 알린다
+            }
+            if (method != PaymentMethod.CARD) {
+                return cardNumber == null || cardNumber.isBlank();
+            }
+            return cardNumber != null && cardNumber.matches("^\\d{4}([- ]?\\d{4}){3}$");
+        }
+
+        /** 숫자만 16자리 (카드가 아니면 null) */
+        public String cardDigits() {
+            return method == PaymentMethod.CARD ? cardNumber.replaceAll("[- ]", "") : null;
+        }
+    }
+
+    /** 환불 1건 = 취소한 배송 묶음 1개 */
+    public record RefundResponse(Long shipmentId, long amount, LocalDateTime refundedAt) {
+
+        public static RefundResponse from(PaymentRefund refund) {
+            return new RefundResponse(refund.getShipment().getId(), refund.getAmount(), refund.getRefundedAt());
+        }
+    }
+
+    /**
+     * 결제 정보. amount = 결제 금액(주문 총액), refundedAmount = 환불 합계, balance = 남은 결제 금액.
+     * cardNumberMasked 는 카드일 때만 (****-****-****-1234).
+     */
+    public record PaymentResponse(
+            Long paymentId,
+            PaymentMethod method,
+            long amount,
+            String cardNumberMasked,
+            String approvalNo,
+            LocalDateTime paidAt,
+            long refundedAmount,
+            long balance,
+            List<RefundResponse> refunds) {
+
+        public static PaymentResponse of(Payment payment, List<PaymentRefund> refunds) {
+            long refunded = refunds.stream().mapToLong(PaymentRefund::getAmount).sum();
+            String masked = payment.getCardLast4() == null ? null : "****-****-****-" + payment.getCardLast4();
+            return new PaymentResponse(payment.getId(), payment.getMethod(), payment.getAmount(), masked,
+                    payment.getApprovalNo(), payment.getPaidAt(), refunded, payment.getAmount() - refunded,
+                    refunds.stream().map(RefundResponse::from).toList());
+        }
     }
 
     /** 주문 줄. 상품명·색상·사이즈·단가는 주문 당시 값이고, productId·imageUrl 은 상품 화면으로 가기 위한 현재 값이다. */
@@ -88,10 +153,14 @@ public final class OrderDtos {
             String zipCode,
             String address,
             String addressDetail,
-            List<ShipmentResponse> shipments) {
+            List<ShipmentResponse> shipments,
+            PaymentResponse payment) {
 
-        /** items: 이 주문의 모든 주문 줄 (배송 묶음과 옵션·상품이 이미 로딩된 것). 배송 묶음별로 나눠 담는다. */
-        public static OrderResponse of(Order order, List<OrderItem> items) {
+        /**
+         * items: 이 주문의 모든 주문 줄 (배송 묶음과 옵션·상품이 이미 로딩된 것). 배송 묶음별로 나눠 담는다.
+         * payment: 결제 정보. V7 이전 주문은 결제가 없어 null
+         */
+        public static OrderResponse of(Order order, List<OrderItem> items, PaymentResponse payment) {
             Map<Long, List<OrderItem>> byShipment = new LinkedHashMap<>();
             Map<Long, Shipment> shipments = new LinkedHashMap<>();
             for (OrderItem item : items) {
@@ -102,7 +171,8 @@ public final class OrderDtos {
             return new OrderResponse(order.getId(), order.getCreatedAt(), order.getTotalPrice(),
                     order.getReceiverName(), order.getReceiverPhone(), order.getZipCode(), order.getAddress(),
                     order.getAddressDetail(),
-                    shipments.values().stream().map(s -> ShipmentResponse.of(s, byShipment.get(s.getId()))).toList());
+                    shipments.values().stream().map(s -> ShipmentResponse.of(s, byShipment.get(s.getId()))).toList(),
+                    payment);
         }
     }
 

@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ssu.shop.domain.cart.dto.CartDtos.CartItemAddRequest;
 import com.ssu.shop.domain.cart.service.CartService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
+import com.ssu.shop.domain.order.dto.OrderDtos.PaymentRequest;
+import com.ssu.shop.domain.payment.entity.PaymentMethod;
 import com.ssu.shop.domain.order.service.OrderService;
 import com.ssu.shop.domain.user.service.AdminUserService;
 import com.ssu.shop.global.error.BusinessException;
@@ -146,7 +148,8 @@ class SellerWithdrawDbTest {
                 cartService.add(buyer, new CartItemAddRequest(firstOption, 1));
                 buyers.add(buyer);
                 tasks.add(() -> outcomeOf(() -> orderService.create(buyer,
-                        new OrderCreateRequest("구매자", "01012345678", "06978", "서울", null))));
+                        new OrderCreateRequest("구매자", "01012345678", "06978", "서울", null,
+                                new PaymentRequest(PaymentMethod.EASY_PAY, null)))));
             }
             tasks.add(() -> outcomeOf(() -> adminUserService.withdraw(user)));
 

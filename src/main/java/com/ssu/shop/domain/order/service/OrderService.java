@@ -5,12 +5,15 @@ import com.ssu.shop.domain.cart.repository.CartItemRepository;
 import com.ssu.shop.domain.inventory.service.StockService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
+import com.ssu.shop.domain.order.dto.OrderDtos.PaymentResponse;
 import com.ssu.shop.domain.order.entity.Order;
 import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
 import com.ssu.shop.domain.order.repository.OrderItemRepository;
 import com.ssu.shop.domain.order.repository.OrderRepository;
 import com.ssu.shop.domain.order.repository.ShipmentRepository;
+import com.ssu.shop.domain.payment.entity.Payment;
+import com.ssu.shop.domain.payment.service.PaymentService;
 import com.ssu.shop.domain.product.entity.Product;
 import com.ssu.shop.domain.product.entity.ProductStatus;
 import com.ssu.shop.domain.seller.entity.Seller;
@@ -52,10 +55,11 @@ public class OrderService {
     private final StockService stockService;
     private final EntityManager entityManager;
     private final Clock clock;
+    private final PaymentService paymentService;
 
     /**
-     * 주문 생성: 장바구니에서 체크한 항목을 주문한다. 전체가 한 트랜잭션이라 중간에 하나라도 실패하면
-     * (재고 부족 등) 주문·재고·재고 이력·장바구니가 모두 주문 전 상태로 돌아간다.
+     * 주문 생성: 장바구니에서 체크한 항목을 주문하고 결제한다. 전체가 한 트랜잭션이라 중간에 하나라도 실패하면
+     * (재고 부족, 결제 거절 등) 주문·재고·재고 이력·장바구니가 모두 주문 전 상태로 돌아간다.
      *
      * 순서
      *  1) 체크한 장바구니 항목 조회 (쿼리 1번)
@@ -67,6 +71,7 @@ public class OrderService {
      *     주문 줄에 복사하는 상품명·단가와 주문 총액도 2) 에서 다시 읽은 값이다
      *  6) 재고 차감 + 재고 이력 (주문 줄마다 한 번)
      *  7) 주문한 장바구니 항목 삭제
+     *  8) 결제 승인 + 결제 기록 (V7). 금액은 2) 에서 다시 읽은 가격으로 계산한 주문 총액. 거절되면 1)~7) 까지 롤백
      *
      * 잠그는 순서는 항상 회원(id 오름차순) → 상품(id 오름차순) → 옵션(id 오름차순)이다. 이 순서를 바꾸면 주문끼리, 또는 주문과 상품 변경이
      * 서로를 기다리다 멈출 수 있다.
@@ -119,45 +124,55 @@ public class OrderService {
         if (deleted != cartItems.size()) {
             throw new BusinessException(ErrorCode.DATA_CONFLICT, "장바구니가 변경되었습니다. 다시 확인하고 주문해 주세요.");
         }
-        return OrderResponse.of(order, orderItems);
+        Payment payment = paymentService.pay(order, request.payment(), orderedAt);
+        return OrderResponse.of(order, orderItems, paymentService.responseOf(payment));
     }
 
     /**
-     * 내 주문 목록 (최신순). 쿼리는 주문 건수와 상관없이 최대 3번:
-     * 주문 한 페이지 → 전체 건수 → 그 페이지 주문들의 주문 줄 전부(배송 묶음·판매자·옵션·상품 포함).
+     * 내 주문 목록 (최신순). 쿼리는 주문 건수와 상관없이 최대 5번:
+     * 주문 한 페이지 → 전체 건수 → 그 페이지 주문들의 주문 줄 전부(배송 묶음·판매자·옵션·상품 포함) → 결제 → 환불.
      */
     public PageResponse<OrderResponse> myOrders(Long userId, int page, int size) {
         Page<Order> orders = orderRepository.findByUser_IdOrderByCreatedAtDescIdDesc(userId, PageRequest.of(page, size));
         if (orders.isEmpty()) {
             return PageResponse.of(orders, List.of());
         }
+        List<Long> orderIds = orders.map(Order::getId).getContent();
         Map<Long, List<OrderItem>> itemsByOrder = orderItemRepository
-                .findAllWithDetailsByOrderIds(orders.map(Order::getId).getContent()).stream()
+                .findAllWithDetailsByOrderIds(orderIds).stream()
                 .collect(Collectors.groupingBy(item -> item.getShipment().getOrder().getId()));
-        return PageResponse.of(orders, order -> OrderResponse.of(order, itemsByOrder.get(order.getId())));
+        Map<Long, PaymentResponse> paymentByOrder = paymentService.responsesByOrderId(orderIds);
+        return PageResponse.of(orders, order -> OrderResponse.of(order, itemsByOrder.get(order.getId()),
+                paymentByOrder.get(order.getId())));
     }
 
     /** 내 주문 상세. 남의 주문은 없는 것처럼 NOT_FOUND */
     public OrderResponse getMyOrder(Long userId, Long orderId) {
         Order order = orderRepository.findByIdAndUser_Id(orderId, userId)
                 .orElseThrow(() -> BusinessException.notFound("주문"));
-        return OrderResponse.of(order, orderItemRepository.findAllWithDetailsByOrderIds(List.of(orderId)));
+        return OrderResponse.of(order, orderItemRepository.findAllWithDetailsByOrderIds(List.of(orderId)),
+                paymentService.responsesByOrderId(List.of(orderId)).get(orderId));
     }
 
     /**
      * 구매자 취소: 배송 묶음(판매자) 단위, 주문완료(ORDERED)일 때만.
-     * 상태 변경과 그 묶음 전체 줄의 재고 복원이 한 트랜잭션이다. 주문의 total_price 는 바꾸지 않는다.
+     * 상태 변경, 그 묶음 전체 줄의 재고 복원, 부분 환불 기록(V7)이 한 트랜잭션이다. 주문의 total_price 는 바꾸지 않는다.
+     * 환불 금액 = 그 묶음의 주문 라인 합계, 환불 시각 = 취소 시각.
      *
-     * 조건부 UPDATE 가 1 을 돌려준 요청만 재고를 복원하므로, 취소를 동시에 두 번 눌러도 재고는 한 번만 돌아오고
-     * 판매자의 "배송준비" 처리와 동시에 와도 둘 중 하나만 성공한다.
+     * 조건부 UPDATE 가 1 을 돌려준 요청만 재고를 복원·환불하므로, 취소를 동시에 두 번 눌러도 재고와 환불은 한 번뿐이고
+     * (DB 도 uk_payment_refunds_shipment 로 막는다) 판매자의 "배송준비" 처리와 동시에 와도 둘 중 하나만 성공한다.
      */
     @Transactional
     public OrderResponse cancel(Long userId, Long orderId, Long shipmentId) {
         checkMyShipment(userId, orderId, shipmentId);
-        if (shipmentRepository.cancel(shipmentId, now()) == 0) {
+        LocalDateTime canceledAt = now();
+        if (shipmentRepository.cancel(shipmentId, canceledAt) == 0) {
             throw new BusinessException(ErrorCode.INVALID_ORDER_STATUS, "주문완료 상태에서만 취소할 수 있습니다.");
         }
-        stockService.restore(orderItemRepository.findAllByShipment_Id(shipmentId));
+        List<OrderItem> items = orderItemRepository.findAllByShipment_Id(shipmentId);
+        stockService.restore(items);
+        paymentService.refund(orderId, shipmentRepository.getReferenceById(shipmentId),
+                items.stream().mapToLong(OrderItem::lineTotal).sum(), canceledAt);
         return getMyOrder(userId, orderId);
     }
 
