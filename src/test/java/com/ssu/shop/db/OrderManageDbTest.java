@@ -117,8 +117,8 @@ class OrderManageDbTest {
         long shipment = order.shipments().get(0).shipmentId();
 
         List<String> outcomes = runTogether(List.of(
-                () -> outcome(() -> orderService.cancel(buyer, order.orderId(), shipment)),
-                () -> outcome(() -> orderService.cancel(buyer, order.orderId(), shipment))));
+                () -> outcome(() -> orderService.cancel(buyer, order.orderId(), shipment, null)),
+                () -> outcome(() -> orderService.cancel(buyer, order.orderId(), shipment, null))));
 
         assertThat(outcomes).containsExactlyInAnyOrder("OK", ErrorCode.INVALID_ORDER_STATUS.name());
         assertThat(stockOf(teeBlack)).isEqualTo(100); // 97 + 3, 두 번 복원됐다면 103
@@ -137,7 +137,7 @@ class OrderManageDbTest {
             int stockBefore = stockOf(teeBlack);
 
             List<String> outcomes = runTogether(List.of(
-                    () -> outcome(() -> orderService.cancel(buyer, order.orderId(), shipment)),
+                    () -> outcome(() -> orderService.cancel(buyer, order.orderId(), shipment, null)),
                     () -> outcome(() -> sellerShipmentService.changeStatus(sellerUserA, shipment,
                             ShipmentStatus.PREPARING))));
 
@@ -169,7 +169,7 @@ class OrderManageDbTest {
 
         assertThat(seller(shipment, ShipmentStatus.PREPARING).status()).isEqualTo(ShipmentStatus.PREPARING);
         // 배송준비부터는 취소 불가, 같은 상태로 다시 바꾸기 불가
-        assertError(ErrorCode.INVALID_ORDER_STATUS, () -> orderService.cancel(buyer, order.orderId(), shipment));
+        assertError(ErrorCode.INVALID_ORDER_STATUS, () -> orderService.cancel(buyer, order.orderId(), shipment, null));
         assertError(ErrorCode.INVALID_ORDER_STATUS, () -> seller(shipment, ShipmentStatus.PREPARING));
 
         seller(shipment, ShipmentStatus.SHIPPING);
@@ -182,7 +182,7 @@ class OrderManageDbTest {
 
         // 구매확정 뒤에는 아무것도 바꿀 수 없다
         assertError(ErrorCode.INVALID_ORDER_STATUS, () -> orderService.confirm(buyer, order.orderId(), shipment));
-        assertError(ErrorCode.INVALID_ORDER_STATUS, () -> orderService.cancel(buyer, order.orderId(), shipment));
+        assertError(ErrorCode.INVALID_ORDER_STATUS, () -> orderService.cancel(buyer, order.orderId(), shipment, null));
         assertError(ErrorCode.INVALID_ORDER_STATUS, () -> seller(shipment, ShipmentStatus.DELIVERED));
         assertThat(stockOf(teeBlack)).isEqualTo(99); // 재고는 주문 때 한 번 줄어든 그대로
         assertIntegrity();
@@ -194,7 +194,7 @@ class OrderManageDbTest {
         long shipmentA = shipmentOf(order, teeBlack);
         long shipmentB = shipmentOf(order, capBlack);
 
-        OrderResponse after = orderService.cancel(buyer, order.orderId(), shipmentA);
+        OrderResponse after = orderService.cancel(buyer, order.orderId(), shipmentA, null);
 
         assertThat(after.totalPrice()).isEqualTo(10_000 * 2 + 19_000 * 3); // 취소돼도 주문 당시 금액 그대로
         assertThat(after.shipments()).extracting(ShipmentResponse::shipmentId, ShipmentResponse::status)
@@ -219,10 +219,10 @@ class OrderManageDbTest {
 
         // 다른 구매자
         assertError(ErrorCode.NOT_FOUND, () -> orderService.getMyOrder(otherBuyer, order.orderId()));
-        assertError(ErrorCode.NOT_FOUND, () -> orderService.cancel(otherBuyer, order.orderId(), shipmentA));
+        assertError(ErrorCode.NOT_FOUND, () -> orderService.cancel(otherBuyer, order.orderId(), shipmentA, null));
         assertError(ErrorCode.NOT_FOUND, () -> orderService.confirm(otherBuyer, order.orderId(), shipmentA));
         // 내 주문 번호에 남의 배송 묶음 번호를 끼워 넣기
-        assertError(ErrorCode.NOT_FOUND, () -> orderService.cancel(otherBuyer, otherOrder.orderId(), shipmentA));
+        assertError(ErrorCode.NOT_FOUND, () -> orderService.cancel(otherBuyer, otherOrder.orderId(), shipmentA, null));
         // 다른 판매자
         assertError(ErrorCode.NOT_FOUND,
                 () -> sellerShipmentService.changeStatus(sellerUserB, shipmentA, ShipmentStatus.PREPARING));

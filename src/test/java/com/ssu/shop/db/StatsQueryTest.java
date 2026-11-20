@@ -175,9 +175,10 @@ class StatsQueryTest {
                 VALUES (?, ?, '수령인', '01012345678', '12345', '서울', ?)""", buyer, total, at);
         long orderId = lastId();
         jdbc.update("""
-                INSERT INTO shipments (order_id, seller_id, status, confirmed_at, canceled_at, created_at)
-                VALUES (?, ?, ?, IF(? = 'CONFIRMED', ?, NULL), IF(? = 'CANCELED', ?, NULL), ?)""",
-                orderId, sellerId, status, status, at, status, at, at);
+                INSERT INTO shipments (order_id, seller_id, status, confirmed_at, canceled_at, canceled_by, created_at)
+                VALUES (?, ?, ?, IF(? = 'CONFIRMED', ?, NULL), IF(? = 'CANCELED', ?, NULL),
+                        IF(? = 'CANCELED', 'BUYER', NULL), ?)""",
+                orderId, sellerId, status, status, at, status, at, status, at);
         long shipmentId = lastId();
         for (Line l : lines) {
             jdbc.update("""

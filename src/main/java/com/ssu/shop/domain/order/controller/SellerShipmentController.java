@@ -1,5 +1,6 @@
 package com.ssu.shop.domain.order.controller;
 
+import com.ssu.shop.domain.order.dto.OrderDtos.SellerCancelRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.SellerShipmentResponse;
 import com.ssu.shop.domain.order.dto.OrderDtos.ShipmentStatusRequest;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
@@ -17,6 +18,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -52,5 +54,17 @@ public class SellerShipmentController {
                                                             @PathVariable Long shipmentId,
                                                             @Valid @RequestBody ShipmentStatusRequest request) {
         return ApiResponse.success(sellerShipmentService.changeStatus(loginUser.id(), shipmentId, request.status()));
+    }
+
+    @Operation(summary = "판매자 취소 — 배송 전(주문완료·배송준비)까지, 사유 필수",
+            description = "본문: {\"reason\": \"품절로 출고 불가\"}. 재고가 복원되고 그 묶음 금액만큼 부분 환불 기록이 생긴다. "
+                    + "구매자 주문내역에 canceledBy=SELLER 와 사유가 보인다. "
+                    + "오류: INVALID_ORDER_STATUS(409) 이미 배송중 이후이거나 취소·확정됨, INVALID_INPUT(400) 사유 없음, "
+                    + "NOT_FOUND(404) 내 배송 묶음이 아님")
+    @PostMapping("/{shipmentId}/cancel")
+    public ApiResponse<SellerShipmentResponse> cancel(@AuthenticationPrincipal LoginUser loginUser,
+                                                      @PathVariable Long shipmentId,
+                                                      @Valid @RequestBody SellerCancelRequest request) {
+        return ApiResponse.success(sellerShipmentService.cancel(loginUser.id(), shipmentId, request.reason()));
     }
 }

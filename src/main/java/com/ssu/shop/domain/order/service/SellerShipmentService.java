@@ -1,6 +1,7 @@
 package com.ssu.shop.domain.order.service;
 
 import com.ssu.shop.domain.order.dto.OrderDtos.SellerShipmentResponse;
+import com.ssu.shop.domain.order.entity.CancelActor;
 import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
@@ -10,6 +11,7 @@ import com.ssu.shop.domain.seller.service.SellerService;
 import com.ssu.shop.global.common.PageResponse;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -21,7 +23,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 판매자 배송 관리: 내 배송 묶음 목록과 배송 상태 변경. 취소와 구매확정은 구매자만 한다(OrderService). */
+/** 판매자 배송 관리: 내 배송 묶음 목록, 배송 상태 변경, 판매자 취소(V8). 구매확정은 구매자만 한다(OrderService). */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -30,6 +32,7 @@ public class SellerShipmentService {
     private final ShipmentRepository shipmentRepository;
     private final OrderItemRepository orderItemRepository;
     private final SellerService sellerService;
+    private final ShipmentCanceler shipmentCanceler;
 
     /**
      * 내 배송 묶음 목록 (최신순). status 를 주면 그 상태만 — 예: CONFIRMED 로 확정된 주문만 따로 본다.
@@ -65,6 +68,25 @@ public class SellerShipmentService {
             throw new BusinessException(ErrorCode.INVALID_ORDER_STATUS,
                     "배송 상태는 주문완료 → 배송준비 → 배송중 → 배송완료 순서로 한 단계씩만 바꿀 수 있습니다.");
         }
+        Shipment updated = shipmentRepository.findWithOrderById(shipmentId).orElseThrow();
+        return SellerShipmentResponse.of(updated,
+                orderItemRepository.findAllWithProductByShipmentIds(List.of(shipmentId)));
+    }
+
+    /**
+     * 판매자 취소 (V8, 팀 결정 2026-11-20): 배송 전(주문완료·배송준비)까지, 사유 필수.
+     * 재고 복원과 그 묶음 금액만큼 부분 환불은 구매자 취소와 같다 (ShipmentCanceler).
+     * 구매자 취소·배송중 처리와 동시에 와도 조건부 UPDATE 라서 하나만 성공한다.
+     */
+    @Transactional
+    public SellerShipmentResponse cancel(Long userId, Long shipmentId, String reason) {
+        Long sellerId = sellerService.getSeller(userId).getId();
+        Shipment shipment = shipmentRepository.findWithOrderById(shipmentId)
+                .filter(s -> s.getSeller().getId().equals(sellerId)) // 남의 배송 묶음은 없는 것처럼
+                .orElseThrow(() -> BusinessException.notFound("배송"));
+        shipmentCanceler.cancel(shipment.getOrder().getId(), shipmentId,
+                EnumSet.of(ShipmentStatus.ORDERED, ShipmentStatus.PREPARING), CancelActor.SELLER, reason.trim(),
+                "배송 전(주문완료·배송준비)에만 취소할 수 있습니다.");
         Shipment updated = shipmentRepository.findWithOrderById(shipmentId).orElseThrow();
         return SellerShipmentResponse.of(updated,
                 orderItemRepository.findAllWithProductByShipmentIds(List.of(shipmentId)));

@@ -1,5 +1,6 @@
 package com.ssu.shop.domain.order.dto;
 
+import com.ssu.shop.domain.order.entity.CancelActor;
 import com.ssu.shop.domain.order.entity.Order;
 import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
@@ -132,6 +133,8 @@ public final class OrderDtos {
             long subtotal,
             LocalDateTime confirmedAt,
             LocalDateTime canceledAt,
+            CancelActor canceledBy,
+            String cancelReason,
             List<OrderItemResponse> items) {
 
         public static ShipmentResponse of(Shipment shipment, List<OrderItem> items) {
@@ -139,6 +142,7 @@ public final class OrderDtos {
                     shipment.getSeller().getCompanyName(), shipment.getStatus(),
                     items.stream().mapToLong(OrderItem::lineTotal).sum(),
                     shipment.getConfirmedAt(), shipment.getCanceledAt(),
+                    shipment.getCanceledBy(), shipment.getCancelReason(),
                     items.stream().map(OrderItemResponse::from).toList());
         }
     }
@@ -176,6 +180,14 @@ public final class OrderDtos {
         }
     }
 
+    /** 구매자 취소 사유 (선택, V8) */
+    public record CancelRequest(@Size(max = 255) String reason) {
+    }
+
+    /** 판매자 취소 (V8): 배송 전(주문완료·배송준비)까지, 사유 필수. 구매자 주문내역에 "판매자 취소: 사유"로 보인다 */
+    public record SellerCancelRequest(@NotBlank @Size(max = 255) String reason) {
+    }
+
     /** 판매자의 배송 상태 변경 요청. 한 칸씩 앞으로만: PREPARING(배송준비) → SHIPPING(배송중) → DELIVERED(배송완료) */
     public record ShipmentStatusRequest(
             @NotNull @Schema(allowableValues = {"PREPARING", "SHIPPING", "DELIVERED"}) ShipmentStatus status) {
@@ -189,6 +201,8 @@ public final class OrderDtos {
             LocalDateTime orderedAt,
             LocalDateTime confirmedAt,
             LocalDateTime canceledAt,
+            CancelActor canceledBy,
+            String cancelReason,
             long subtotal,
             String receiverName,
             String receiverPhone,
@@ -202,6 +216,7 @@ public final class OrderDtos {
             Order order = shipment.getOrder();
             return new SellerShipmentResponse(shipment.getId(), order.getId(), shipment.getStatus(),
                     shipment.getCreatedAt(), shipment.getConfirmedAt(), shipment.getCanceledAt(),
+                    shipment.getCanceledBy(), shipment.getCancelReason(),
                     items.stream().mapToLong(OrderItem::lineTotal).sum(),
                     order.getReceiverName(), order.getReceiverPhone(), order.getZipCode(), order.getAddress(),
                     order.getAddressDetail(), items.stream().map(OrderItemResponse::from).toList());
