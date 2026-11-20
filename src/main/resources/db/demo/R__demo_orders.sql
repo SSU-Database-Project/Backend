@@ -124,10 +124,11 @@ UPDATE demo_ord o JOIN orders x ON x.address_detail = CONCAT('시연 주문 ', o
    SET o.order_id = x.id;
 
 -- ----- shipments: 주문 안의 판매자마다 하나. 상태와 시각은 CHECK 에 맞게 짝을 맞춘다 -----
-INSERT INTO shipments (order_id, seller_id, status, confirmed_at, canceled_at, created_at, updated_at)
+INSERT INTO shipments (order_id, seller_id, status, confirmed_at, canceled_at, canceled_by, created_at, updated_at)
 SELECT DISTINCT o.order_id, d.seller_id, o.status,
        IF(o.status = 'CONFIRMED', o.created_at + INTERVAL 5 DAY, NULL),
        IF(o.status = 'CANCELED', o.created_at + INTERVAL 30 MINUTE, NULL),
+       IF(o.status = 'CANCELED', 'BUYER', NULL),   -- V8: 시연 취소는 모두 구매자 취소
        o.created_at, o.created_at
 FROM demo_ord o
 JOIN demo_line l ON l.n = o.n

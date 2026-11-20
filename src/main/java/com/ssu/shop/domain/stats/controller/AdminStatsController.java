@@ -1,5 +1,6 @@
 package com.ssu.shop.domain.stats.controller;
 
+import com.ssu.shop.domain.stats.dto.StatsDtos.BrandSalesResponse;
 import com.ssu.shop.domain.stats.dto.StatsDtos.SalesStatsResponse;
 import com.ssu.shop.domain.stats.dto.StatsPeriod;
 import com.ssu.shop.domain.stats.service.StatsService;
@@ -29,5 +30,16 @@ public class AdminStatsController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ApiResponse.success(statsService.platformSales(period, from, to));
+    }
+
+    @Operation(summary = "브랜드별 판매량·매출",
+            description = "다른 통계와 같은 기준(취소 제외, 주문일). from/to 생략 시 월별 통계와 같은 기본 기간. "
+                    + "승인된 브랜드는 판매가 없어도 0 으로, 기간 안에 판매가 있던 브랜드는 지금 상태와 상관없이 포함 "
+                    + "→ 브랜드 합계 = 플랫폼 합계")
+    @GetMapping("/brands")
+    public ApiResponse<BrandSalesResponse> brands(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiResponse.success(statsService.brandSales(from, to));
     }
 }

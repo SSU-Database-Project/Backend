@@ -36,6 +36,7 @@ import com.ssu.shop.domain.product.repository.ProductRepository;
 import com.ssu.shop.domain.product.repository.SizeRepository;
 import com.ssu.shop.domain.seller.entity.Seller;
 import com.ssu.shop.domain.seller.service.SellerService;
+import com.ssu.shop.domain.user.entity.Role;
 import com.ssu.shop.global.error.ErrorCode;
 import com.ssu.shop.support.Fixtures;
 import java.util.List;
@@ -104,7 +105,7 @@ class ProductServiceTest {
 
     @Test
     void 상품_등록시_승인대기로_만들고_옵션별_재고와_입고이력을_함께_만든다() {
-        when(brandRepository.findById(10L)).thenReturn(Optional.of(myBrand));
+        when(brandRepository.findByIdForShare(10L)).thenReturn(Optional.of(myBrand));
         when(categoryService.getCategory(11L)).thenReturn(leaf);
 
         productService.create(100L, request(10L, 11L,
@@ -124,7 +125,7 @@ class ProductServiceTest {
 
     @Test
     void 카테고리의_사이즈_체계와_다른_사이즈는_거부한다() {
-        when(brandRepository.findById(10L)).thenReturn(Optional.of(myBrand));
+        when(brandRepository.findByIdForShare(10L)).thenReturn(Optional.of(myBrand));
         when(categoryService.getCategory(11L)).thenReturn(leaf);
 
         assertThatThrownBy(() -> productService.create(100L, request(10L, 11L,
@@ -134,7 +135,7 @@ class ProductServiceTest {
 
     @Test
     void 같은_색상_사이즈_조합이_중복되면_거부한다() {
-        when(brandRepository.findById(10L)).thenReturn(Optional.of(myBrand));
+        when(brandRepository.findByIdForShare(10L)).thenReturn(Optional.of(myBrand));
         when(categoryService.getCategory(11L)).thenReturn(leaf);
 
         assertThatThrownBy(() -> productService.create(100L, request(10L, 11L,
@@ -144,7 +145,7 @@ class ProductServiceTest {
 
     @Test
     void 브랜드_안에서_품번이_겹치면_거부한다() {
-        when(brandRepository.findById(10L)).thenReturn(Optional.of(myBrand));
+        when(brandRepository.findByIdForShare(10L)).thenReturn(Optional.of(myBrand));
         when(categoryService.getCategory(11L)).thenReturn(leaf);
         when(productRepository.existsByBrand_IdAndProductCode(10L, "UB-001")).thenReturn(true);
 
@@ -155,7 +156,7 @@ class ProductServiceTest {
 
     @Test
     void 다른_판매자의_브랜드로는_등록할_수_없다() {
-        when(brandRepository.findById(20L)).thenReturn(Optional.of(Fixtures.brand(20L, other, BrandStatus.APPROVED)));
+        when(brandRepository.findByIdForShare(20L)).thenReturn(Optional.of(Fixtures.brand(20L, other, BrandStatus.APPROVED)));
 
         assertThatThrownBy(() -> productService.create(100L, request(20L, 11L, List.of(new OptionRequest(1L, 3L, 1)))))
                 .extracting("errorCode").isEqualTo(ErrorCode.BRAND_NOT_OWNED);
@@ -163,7 +164,7 @@ class ProductServiceTest {
 
     @Test
     void 승인되지_않은_브랜드로는_등록할_수_없다() {
-        when(brandRepository.findById(10L)).thenReturn(Optional.of(Fixtures.brand(10L, me, BrandStatus.PENDING)));
+        when(brandRepository.findByIdForShare(10L)).thenReturn(Optional.of(Fixtures.brand(10L, me, BrandStatus.PENDING)));
 
         assertThatThrownBy(() -> productService.create(100L, request(10L, 11L, List.of(new OptionRequest(1L, 3L, 1)))))
                 .extracting("errorCode").isEqualTo(ErrorCode.BRAND_NOT_APPROVED);
@@ -171,7 +172,7 @@ class ProductServiceTest {
 
     @Test
     void 대분류에는_상품을_등록할_수_없다() {
-        when(brandRepository.findById(10L)).thenReturn(Optional.of(myBrand));
+        when(brandRepository.findByIdForShare(10L)).thenReturn(Optional.of(myBrand));
         when(categoryService.getCategory(1L)).thenReturn(root);
 
         assertThatThrownBy(() -> productService.create(100L, request(10L, 1L, List.of(new OptionRequest(1L, 3L, 1)))))
@@ -240,6 +241,9 @@ class ProductServiceTest {
 
     @Test
     void 관리자_승인은_승인대기나_차단_상태에서만_가능하다() {
+        when(productRepository.findById(50L)).thenReturn(Optional.of(Fixtures.product(50L,
+                Fixtures.brand(10L, Fixtures.seller(1L, Fixtures.user(1L, "s@test.com", Role.SELLER)), BrandStatus.APPROVED),
+                leaf, ProductStatus.PENDING)));
         when(productRepository.transitStatus(eq(50L), anyCollection(), eq(ProductStatus.ON_SALE), any()))
                 .thenReturn(0);
         when(productRepository.existsById(50L)).thenReturn(true);
@@ -247,6 +251,18 @@ class ProductServiceTest {
         assertThatThrownBy(() -> productService.adminChangeStatus(50L,
                 new AdminProductStatusRequest(ProductStatus.ON_SALE, null)))
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_STATUS_TRANSITION);
+    }
+
+    @Test
+    void 브랜드가_승인되기_전에는_상품을_승인할_수_없다() {
+        when(productRepository.findById(51L)).thenReturn(Optional.of(Fixtures.product(51L,
+                Fixtures.brand(11L, Fixtures.seller(1L, Fixtures.user(1L, "s@test.com", Role.SELLER)), BrandStatus.PENDING),
+                leaf, ProductStatus.PENDING)));
+
+        assertThatThrownBy(() -> productService.adminChangeStatus(51L,
+                new AdminProductStatusRequest(ProductStatus.ON_SALE, null)))
+                .extracting("errorCode").isEqualTo(ErrorCode.BRAND_NOT_APPROVED);
+        verify(productRepository, never()).transitStatus(anyLong(), anyCollection(), any(), any());
     }
 
     @Test

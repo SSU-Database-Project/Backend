@@ -2,7 +2,9 @@ package com.ssu.shop.domain.stats.service;
 
 import com.ssu.shop.domain.seller.service.SellerService;
 import com.ssu.shop.domain.stats.dto.StatsDtos.Figure;
+import com.ssu.shop.domain.stats.dto.StatsDtos.BrandSales;
 import com.ssu.shop.domain.stats.dto.StatsDtos.SalesPoint;
+import com.ssu.shop.domain.stats.dto.StatsDtos.BrandSalesResponse;
 import com.ssu.shop.domain.stats.dto.StatsDtos.SalesStatsResponse;
 import com.ssu.shop.domain.stats.dto.StatsDtos.SellerSummaryResponse;
 import com.ssu.shop.domain.stats.dto.StatsDtos.TopProductsResponse;
@@ -43,6 +45,14 @@ public class StatsService {
     public SalesStatsResponse platformSales(StatsPeriod period, LocalDate from, LocalDate to) {
         Range r = resolve(period, from, to);
         return toResponse(period, r, statsRepository.platformSales(period, r.from(), r.to()));
+    }
+
+    /** 브랜드별 판매량·매출 (관리자, V8). 기간을 생략하면 월별 통계와 같은 기본 기간 */
+    public BrandSalesResponse brandSales(LocalDate from, LocalDate to) {
+        Range r = resolve(StatsPeriod.MONTHLY, from, to);
+        List<BrandSales> brands = statsRepository.brandSales(r.from(), r.to());
+        return new BrandSalesResponse(r.from(), r.to(), brands.stream().mapToLong(BrandSales::quantity).sum(),
+                brands.stream().mapToLong(BrandSales::revenue).sum(), brands);
     }
 
     /** 상품별 판매 순위. sort = quantity(판매량) | revenue(매출) */

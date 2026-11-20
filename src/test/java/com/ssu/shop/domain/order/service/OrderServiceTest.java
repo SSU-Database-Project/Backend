@@ -87,6 +87,8 @@ class OrderServiceTest {
     EntityManager entityManager;
     @Mock
     PaymentService paymentService;
+    @Mock
+    ShipmentCanceler shipmentCanceler;
 
     OrderService orderService;
 
@@ -98,7 +100,7 @@ class OrderServiceTest {
     @BeforeEach
     void setUp() {
         orderService = new OrderService(cartItemRepository, orderRepository, shipmentRepository, orderItemRepository,
-                userRepository, stockService, entityManager, CLOCK, paymentService);
+                userRepository, stockService, entityManager, CLOCK, paymentService, shipmentCanceler);
         sellerA = Fixtures.seller(1L, Fixtures.user(1L, "a@test.com"));
         sellerB = Fixtures.seller(2L, Fixtures.user(2L, "b@test.com"));
         leaf = Fixtures.leafCategory(11L, Fixtures.rootCategory(1L, SizeGroup.CLOTHING));

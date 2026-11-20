@@ -139,8 +139,9 @@ class AccountRulesDbTest {
         jdbc.update("""
                 UPDATE shipments s JOIN orders o ON o.id = s.order_id
                    SET s.status = ?, s.confirmed_at = IF(? = 'CONFIRMED', NOW(6), NULL),
-                       s.canceled_at = IF(? = 'CANCELED', NOW(6), NULL)
-                 WHERE o.user_id = ?""", status, status, status, buyerId);
+                       s.canceled_at = IF(? = 'CANCELED', NOW(6), NULL),
+                       s.canceled_by = IF(? = 'CANCELED', 'BUYER', NULL)
+                 WHERE o.user_id = ?""", status, status, status, status, buyerId);
     }
 
     private String userStatus(long userId) {

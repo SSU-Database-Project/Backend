@@ -18,6 +18,14 @@ public interface ProductOptionRepository extends JpaRepository<ProductOption, Lo
             """)
     List<ProductOption> findAllWithColorAndSize(@Param("productId") Long productId);
 
+    /** 판매자·관리자 목록 (V8): 한 페이지 상품들의 옵션 + 색상 + 사이즈를 쿼리 1번으로 (product_id IN ...) — N+1 방지 */
+    @Query("""
+            select o from ProductOption o join fetch o.color join fetch o.size
+            where o.product.id in :productIds
+            order by o.product.id, o.color.displayOrder, o.size.displayOrder
+            """)
+    List<ProductOption> findAllWithColorAndSizeByProductIds(@Param("productIds") Collection<Long> productIds);
+
     /** 목록 화면: 상품별 총 재고를 한 번에 (product_id IN ... GROUP BY) — N+1 방지 */
     @Query("""
             select o.product.id as productId, sum(o.stockQuantity) as totalStock

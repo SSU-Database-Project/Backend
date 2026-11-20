@@ -29,6 +29,20 @@ public final class StatsDtos {
     public record TopProductsResponse(LocalDate from, LocalDate to, String sort, List<TopProduct> products) {
     }
 
+    /**
+     * 브랜드별 판매 (관리자, V8). 판매·날짜 기준은 다른 통계와 같다 (취소 제외, 주문 시각).
+     * productCount = 삭제되지 않은 상품 수. 승인된 브랜드는 판매가 없어도 0 으로 나오고, 기간 안에 판매가 있던 브랜드는
+     * 지금 상태(거절·삭제 포함)와 상관없이 나온다 → 브랜드 합계 = 플랫폼 합계.
+     */
+    public record BrandSales(Long brandId, String brandName, String brandStatus, Long sellerId,
+                             String sellerCompanyName, long productCount, long quantity, long revenue,
+                             long orderCount) {
+    }
+
+    public record BrandSalesResponse(LocalDate from, LocalDate to, long totalQuantity, long totalRevenue,
+                                     List<BrandSales> brands) {
+    }
+
     public record Figure(long quantity, long revenue, long orderCount) {
     }
 
