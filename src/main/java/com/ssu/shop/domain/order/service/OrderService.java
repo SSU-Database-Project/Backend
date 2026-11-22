@@ -6,9 +6,11 @@ import com.ssu.shop.domain.inventory.service.StockService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
 import com.ssu.shop.domain.order.dto.OrderDtos.PaymentResponse;
+import com.ssu.shop.domain.order.entity.CancelActor;
 import com.ssu.shop.domain.order.entity.Order;
 import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
+import com.ssu.shop.domain.order.entity.ShipmentStatus;
 import com.ssu.shop.domain.order.repository.OrderItemRepository;
 import com.ssu.shop.domain.order.repository.OrderRepository;
 import com.ssu.shop.domain.order.repository.ShipmentRepository;
@@ -29,6 +31,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +59,7 @@ public class OrderService {
     private final EntityManager entityManager;
     private final Clock clock;
     private final PaymentService paymentService;
+    private final ShipmentCanceler shipmentCanceler;
 
     /**
      * 주문 생성: 장바구니에서 체크한 항목을 주문하고 결제한다. 전체가 한 트랜잭션이라 중간에 하나라도 실패하면
@@ -155,24 +159,15 @@ public class OrderService {
     }
 
     /**
-     * 구매자 취소: 배송 묶음(판매자) 단위, 주문완료(ORDERED)일 때만.
-     * 상태 변경, 그 묶음 전체 줄의 재고 복원, 부분 환불 기록(V7)이 한 트랜잭션이다. 주문의 total_price 는 바꾸지 않는다.
-     * 환불 금액 = 그 묶음의 주문 라인 합계, 환불 시각 = 취소 시각.
-     *
-     * 조건부 UPDATE 가 1 을 돌려준 요청만 재고를 복원·환불하므로, 취소를 동시에 두 번 눌러도 재고와 환불은 한 번뿐이고
-     * (DB 도 uk_payment_refunds_shipment 로 막는다) 판매자의 "배송준비" 처리와 동시에 와도 둘 중 하나만 성공한다.
+     * 구매자 취소: 배송 묶음(판매자) 단위, 주문완료(ORDERED)일 때만. 사유는 선택 (V8).
+     * 상태 변경, 그 묶음 전체 줄의 재고 복원, 부분 환불 기록(V7)이 한 트랜잭션이다 (ShipmentCanceler).
+     * 주문의 total_price 는 바꾸지 않는다. 판매자의 "배송준비"·판매자 취소와 동시에 와도 하나만 성공한다.
      */
     @Transactional
-    public OrderResponse cancel(Long userId, Long orderId, Long shipmentId) {
+    public OrderResponse cancel(Long userId, Long orderId, Long shipmentId, String reason) {
         checkMyShipment(userId, orderId, shipmentId);
-        LocalDateTime canceledAt = now();
-        if (shipmentRepository.cancel(shipmentId, canceledAt) == 0) {
-            throw new BusinessException(ErrorCode.INVALID_ORDER_STATUS, "주문완료 상태에서만 취소할 수 있습니다.");
-        }
-        List<OrderItem> items = orderItemRepository.findAllByShipment_Id(shipmentId);
-        stockService.restore(items);
-        paymentService.refund(orderId, shipmentRepository.getReferenceById(shipmentId),
-                items.stream().mapToLong(OrderItem::lineTotal).sum(), canceledAt);
+        shipmentCanceler.cancel(orderId, shipmentId, EnumSet.of(ShipmentStatus.ORDERED), CancelActor.BUYER,
+                reason == null || reason.isBlank() ? null : reason.trim(), "주문완료 상태에서만 취소할 수 있습니다.");
         return getMyOrder(userId, orderId);
     }
 

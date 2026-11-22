@@ -112,6 +112,20 @@ public class ProductService {
     public ProductDetailResponse create(Long userId, ProductCreateRequest request) {
         Seller seller = sellerService.getSeller(userId);
         Brand brand = getUsableBrand(request.brandId(), seller.getId());
+        return createFor(brand, request);
+    }
+
+    /**
+     * 브랜드의 첫 상품 (V8, BrandService.createWithProduct 가 같은 트랜잭션에서 부른다).
+     * 브랜드가 아직 승인 대기라도 등록한다. 상품도 승인 대기(PENDING)라 구매자에게 보이지 않고,
+     * 관리자는 브랜드를 승인한 뒤에야 이 상품을 승인할 수 있다 (adminChangeStatus).
+     */
+    @Transactional
+    public ProductDetailResponse createInitial(Brand brand, ProductCreateRequest request) {
+        return createFor(brand, request);
+    }
+
+    private ProductDetailResponse createFor(Brand brand, ProductCreateRequest request) {
         Category category = getLeafCategory(request.categoryId());
         String productCode = request.productCode().trim();
         if (productRepository.existsByBrand_IdAndProductCode(brand.getId(), productCode)) {
@@ -243,7 +257,7 @@ public class ProductService {
         specs.add(status != null ? statusIn(EnumSet.of(status)) : statusNot(ProductStatus.DELETED));
         Page<Product> result = productRepository.findAll(Specification.allOf(specs),
                 PageRequest.of(page, size, ProductSort.LATEST.getSort()));
-        return toSummaryPage(result);
+        return toSummaryPageWithOptions(result);
     }
 
     /** 판매자 상세 (승인 전·거절 상품도 본인 것이면 조회) */
@@ -265,7 +279,7 @@ public class ProductService {
         }
         Page<Product> result = productRepository.findAll(Specification.allOf(specs),
                 PageRequest.of(page, size, ProductSort.OLDEST.getSort()));
-        return toSummaryPage(result);
+        return toSummaryPageWithOptions(result);
     }
 
     public ProductDetailResponse adminDetail(Long productId) {
@@ -280,6 +294,14 @@ public class ProductService {
     @Transactional
     public ProductDetailResponse adminChangeStatus(Long productId, AdminProductStatusRequest request) {
         ProductStatus to = request.status();
+        if (to == ProductStatus.ON_SALE) {
+            // 승인 대기 브랜드에 먼저 등록한 첫 상품(V8)은 브랜드가 승인된 뒤에만 판매중이 될 수 있다
+            Product product = productRepository.findById(productId)
+                    .orElseThrow(() -> BusinessException.notFound("상품"));
+            if (!product.getBrand().isApproved()) {
+                throw new BusinessException(ErrorCode.BRAND_NOT_APPROVED, "브랜드가 승인된 뒤에 상품을 승인할 수 있습니다.");
+            }
+        }
         Set<ProductStatus> from = switch (to) {
             case ON_SALE -> EnumSet.of(ProductStatus.PENDING, ProductStatus.BLOCKED);
             case REJECTED -> EnumSet.of(ProductStatus.PENDING);
@@ -360,7 +382,9 @@ public class ProductService {
 
     /** 브랜드 소유권 + 승인 여부. 승인 여부는 다른 행의 값이라 CHECK 로 표현할 수 없어 서비스에서 검증한다. */
     private Brand getUsableBrand(Long brandId, Long sellerId) {
-        Brand brand = brandRepository.findById(brandId).orElseThrow(() -> BusinessException.notFound("브랜드"));
+        Brand brand = brandRepository.findByIdForShare(brandId)
+                .filter(b -> !b.isDeleted())
+                .orElseThrow(() -> BusinessException.notFound("브랜드"));
         if (!brand.isOwnedBy(sellerId)) {
             throw new BusinessException(ErrorCode.BRAND_NOT_OWNED);
         }
@@ -391,6 +415,21 @@ public class ProductService {
     private PageResponse<ProductSummaryResponse> toSummaryPage(Page<Product> result) {
         Map<Long, Integer> stocks = totalStocksOf(result.getContent());
         return PageResponse.of(result, p -> ProductSummaryResponse.of(p, stocks.getOrDefault(p.getId(), 0)));
+    }
+
+    /**
+     * 판매자·관리자 목록 (V8): 옵션까지 담는다. 그 페이지 상품들의 옵션을 IN 조회 1번으로 가져오므로
+     * 상품 수와 상관없이 쿼리 수가 일정하다 (전에는 프론트가 상품마다 상세를 다시 불렀다).
+     */
+    private PageResponse<ProductSummaryResponse> toSummaryPageWithOptions(Page<Product> result) {
+        if (result.isEmpty()) {
+            return PageResponse.of(result, List.of());
+        }
+        Map<Long, List<ProductOption>> options = optionRepository
+                .findAllWithColorAndSizeByProductIds(result.map(Product::getId).getContent()).stream()
+                .collect(Collectors.groupingBy(o -> o.getProduct().getId()));
+        return PageResponse.of(result,
+                p -> ProductSummaryResponse.withOptions(p, options.getOrDefault(p.getId(), List.of())));
     }
 
     /** 총 재고 일괄 조회: product_options WHERE product_id IN (...) GROUP BY product_id */

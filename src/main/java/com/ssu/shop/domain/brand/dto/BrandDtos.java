@@ -2,8 +2,11 @@ package com.ssu.shop.domain.brand.dto;
 
 import com.ssu.shop.domain.brand.entity.Brand;
 import com.ssu.shop.domain.brand.entity.BrandStatus;
+import com.ssu.shop.domain.product.dto.ProductDtos.InitialProductRequest;
+import com.ssu.shop.domain.product.dto.ProductDtos.ProductDetailResponse;
 import com.ssu.shop.domain.product.dto.ProductDtos.ProductSummaryResponse;
 import com.ssu.shop.global.common.PageResponse;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -18,6 +21,18 @@ public final class BrandDtos {
             @NotBlank @Size(max = 100) String name,
             @Size(max = 1000) String description,
             @Size(max = 500) String logoUrl) {
+    }
+
+    /**
+     * 브랜드 + 첫 상품 한 번에 등록 (V8). 한 트랜잭션: 상품 등록이 실패하면 브랜드도 만들어지지 않는다.
+     * 브랜드와 상품 모두 승인 대기(PENDING)로 생기고, 관리자는 브랜드를 먼저 승인한 뒤 상품을 따로 승인한다.
+     */
+    public record BrandWithProductRequest(
+            @NotNull @Valid BrandCreateRequest brand,
+            @NotNull @Valid InitialProductRequest product) {
+    }
+
+    public record BrandWithProductResponse(BrandResponse brand, ProductDetailResponse product) {
     }
 
     /** 관리자 승인/거절: status 는 APPROVED 또는 REJECTED, 거절이면 사유 */

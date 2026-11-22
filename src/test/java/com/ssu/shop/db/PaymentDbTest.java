@@ -195,7 +195,7 @@ class PaymentDbTest {
         ShipmentResponse capShipment = order.shipments().stream().filter(s -> s.subtotal() == 18_000).findFirst()
                 .orElseThrow();
 
-        OrderResponse canceled = orderService.cancel(buyer, order.orderId(), capShipment.shipmentId());
+        OrderResponse canceled = orderService.cancel(buyer, order.orderId(), capShipment.shipmentId(), null);
 
         PaymentResponse payment = canceled.payment();
         assertThat(payment.refundedAmount()).isEqualTo(18_000);
@@ -204,7 +204,7 @@ class PaymentDbTest {
             assertThat(r.shipmentId()).isEqualTo(capShipment.shipmentId());
             assertThat(r.amount()).isEqualTo(18_000);
         });
-        assertThat(errorOf(() -> orderService.cancel(buyer, order.orderId(), capShipment.shipmentId())))
+        assertThat(errorOf(() -> orderService.cancel(buyer, order.orderId(), capShipment.shipmentId(), null)))
                 .isEqualTo(ErrorCode.INVALID_ORDER_STATUS);
         assertThat(count("SELECT COUNT(*) FROM payment_refunds WHERE shipment_id = ?", capShipment.shipmentId()))
                 .isEqualTo(1);
@@ -219,8 +219,8 @@ class PaymentDbTest {
         long shipmentId = order.shipments().get(0).shipmentId();
 
         List<String> outcomes = runTogether(List.of(
-                () -> outcomeOf(() -> orderService.cancel(buyer, order.orderId(), shipmentId)),
-                () -> outcomeOf(() -> orderService.cancel(buyer, order.orderId(), shipmentId))));
+                () -> outcomeOf(() -> orderService.cancel(buyer, order.orderId(), shipmentId, null)),
+                () -> outcomeOf(() -> orderService.cancel(buyer, order.orderId(), shipmentId, null))));
 
         assertThat(outcomes).containsExactlyInAnyOrder("OK", ErrorCode.INVALID_ORDER_STATUS.name());
         assertThat(count("SELECT COUNT(*) FROM payment_refunds WHERE shipment_id = ?", shipmentId)).isEqualTo(1);
@@ -232,7 +232,7 @@ class PaymentDbTest {
         cartService.add(buyer, new CartItemAddRequest(teeOption, 1));
         cartService.add(buyer, new CartItemAddRequest(capOption, 2));
         OrderResponse order = orderService.create(buyer, order(PaymentMethod.CARD, "1111-2222-3333-4444"));
-        orderService.cancel(buyer, order.orderId(), order.shipments().get(0).shipmentId());
+        orderService.cancel(buyer, order.orderId(), order.shipments().get(0).shipmentId(), null);
 
         String script = Files.readString(Path.of("scripts/check-integrity.sql"));
         String query = script.substring(script.indexOf("SELECT '01"), script.lastIndexOf(';'));

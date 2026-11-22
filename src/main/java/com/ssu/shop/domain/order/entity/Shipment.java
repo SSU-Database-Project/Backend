@@ -60,6 +60,16 @@ public class Shipment {
     @Column(name = "canceled_at")
     private LocalDateTime canceledAt;
 
+    /** 취소한 사람 (V8). 취소 상태일 때만 값이 있다 (DB CHECK) */
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "canceled_by", length = 10)
+    private CancelActor canceledBy;
+
+    /** 취소 사유 (V8). 판매자 취소는 필수 (DB CHECK), 구매자는 선택 */
+    @Column(name = "cancel_reason")
+    private String cancelReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

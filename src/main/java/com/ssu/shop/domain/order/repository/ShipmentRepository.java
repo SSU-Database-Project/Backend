@@ -1,8 +1,10 @@
 package com.ssu.shop.domain.order.repository;
 
+import com.ssu.shop.domain.order.entity.CancelActor;
 import com.ssu.shop.domain.order.entity.Shipment;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -36,13 +38,18 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     @Query("update Shipment s set s.status = :to where s.id = :id and s.status = :from")
     int transit(@Param("id") Long id, @Param("from") ShipmentStatus from, @Param("to") ShipmentStatus to);
 
-    /** 구매자 취소: 주문완료(ORDERED)일 때만. 상태와 취소 시각을 함께 넣는다 (DB CHECK) */
+    /**
+     * 취소: from 상태일 때만. 상태·취소 시각·취소한 사람·사유를 함께 넣는다 (DB CHECK).
+     * 구매자는 from = {ORDERED}, 판매자는 {ORDERED, PREPARING} (배송 전까지).
+     */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
-            update Shipment s set s.status = com.ssu.shop.domain.order.entity.ShipmentStatus.CANCELED, s.canceledAt = :now
-             where s.id = :id and s.status = com.ssu.shop.domain.order.entity.ShipmentStatus.ORDERED
+            update Shipment s set s.status = com.ssu.shop.domain.order.entity.ShipmentStatus.CANCELED, s.canceledAt = :now,
+                   s.canceledBy = :by, s.cancelReason = :reason
+             where s.id = :id and s.status in :from
             """)
-    int cancel(@Param("id") Long id, @Param("now") LocalDateTime now);
+    int cancel(@Param("id") Long id, @Param("from") Collection<ShipmentStatus> from, @Param("now") LocalDateTime now,
+               @Param("by") CancelActor by, @Param("reason") String reason);
 
     /** 구매확정: 배송완료(DELIVERED)일 때만. 상태와 확정 시각을 함께 넣는다 (DB CHECK) */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -84,4 +91,15 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                FOR SHARE
             """, nativeQuery = true)
     long countInProgressBySellerForUpdate(@Param("sellerId") Long sellerId);
+
+    /** 브랜드 기준 (V8 브랜드 삭제): 그 브랜드 상품이 담긴 진행 중 배송 묶음 수. 잠금 읽기 */
+    @Query(value = """
+            SELECT COUNT(DISTINCT sh.id) FROM shipments sh
+              JOIN order_items oi     ON oi.shipment_id = sh.id
+              JOIN product_options po ON po.id = oi.option_id
+              JOIN products p         ON p.id = po.product_id
+             WHERE p.brand_id = :brandId AND sh.status IN ('ORDERED', 'PREPARING', 'SHIPPING')
+               FOR SHARE
+            """, nativeQuery = true)
+    long countInProgressByBrandForUpdate(@Param("brandId") Long brandId);
 }

@@ -1,5 +1,6 @@
 package com.ssu.shop.domain.order.controller;
 
+import com.ssu.shop.domain.order.dto.OrderDtos.CancelRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
 import com.ssu.shop.domain.order.service.OrderService;
@@ -65,12 +66,14 @@ public class OrderController {
     }
 
     @Operation(summary = "주문 취소 — 판매자별 배송 묶음 단위, 주문완료(ORDERED)일 때만",
-            description = "그 배송 묶음의 상품 재고가 복원되고, 그 묶음 금액만큼 부분 환불 기록이 생긴다(payment.refunds). 같은 주문의 다른 판매자 묶음은 그대로다. "
+            description = "본문(선택): {\"reason\": \"단순 변심\"}. 그 배송 묶음의 상품 재고가 복원되고, 그 묶음 금액만큼 부분 환불 기록이 생긴다(payment.refunds). 같은 주문의 다른 판매자 묶음은 그대로다. "
                     + "오류: INVALID_ORDER_STATUS(409) 이미 배송준비 이후이거나 취소됨, NOT_FOUND(404) 내 주문이 아님")
     @PostMapping("/{orderId}/shipments/{shipmentId}/cancel")
     public ApiResponse<OrderResponse> cancel(@AuthenticationPrincipal LoginUser loginUser,
-                                             @PathVariable Long orderId, @PathVariable Long shipmentId) {
-        return ApiResponse.success(orderService.cancel(loginUser.id(), orderId, shipmentId));
+                                             @PathVariable Long orderId, @PathVariable Long shipmentId,
+                                             @Valid @RequestBody(required = false) CancelRequest request) {
+        return ApiResponse.success(orderService.cancel(loginUser.id(), orderId, shipmentId,
+                request == null ? null : request.reason()));
     }
 
     @Operation(summary = "구매확정 — 배송완료(DELIVERED)일 때만",

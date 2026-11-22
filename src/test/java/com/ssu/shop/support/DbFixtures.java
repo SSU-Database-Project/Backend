@@ -66,6 +66,13 @@ public class DbFixtures {
                  JOIN products p ON p.id = o.product_id
                  JOIN brands b ON b.id = p.brand_id
                 WHERE b.name LIKE ?""";
+        // 삭제한 브랜드(V8)는 이름이 'deleted_{id}_…' 로 바뀌어 아래 이름 조건에 안 걸리므로 이 tag 이름으로 되돌린다
+        jdbc.update("""
+                UPDATE brands b
+                  JOIN sellers s ON s.id = b.seller_id
+                  JOIN users u ON u.id = s.user_id
+                   SET b.name = CONCAT(?, 'DELETED-', b.id)
+                 WHERE u.email LIKE ? AND b.name LIKE 'deleted\\_%'""", tag.toUpperCase() + "-", users);
         jdbc.update("DELETE h FROM stock_history h JOIN product_options o ON o.id = h.option_id" + optionsOfTag, brands);
         // 결제·환불 (V7): 주문 라인·배송 묶음·주문보다 먼저
         jdbc.update("""

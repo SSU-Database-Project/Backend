@@ -1,5 +1,6 @@
 package com.ssu.shop.domain.stats.repository;
 
+import com.ssu.shop.domain.stats.dto.StatsDtos.BrandSales;
 import com.ssu.shop.domain.stats.dto.StatsDtos.Figure;
 import com.ssu.shop.domain.stats.dto.StatsDtos.SalesPoint;
 import com.ssu.shop.domain.stats.dto.StatsDtos.TopProduct;
@@ -129,6 +130,37 @@ public class StatsRepository {
                     result.put(rs.getString("status"), rs.getLong("cnt"));
                 });
         return result;
+    }
+
+    /**
+     * 브랜드별 판매 (V8). 기간 안의 취소되지 않은 배송 묶음 → 주문 라인 → 옵션 → 상품 → 브랜드로 묶는다.
+     * orderCount = 그 브랜드 상품이 담긴 서로 다른 주문 수. 매출 순(같으면 판매량 순, 브랜드 id 순).
+     */
+    public List<BrandSales> brandSales(LocalDate from, LocalDate to) {
+        String sql = """
+                SELECT b.id, b.name, b.status, s.id AS seller_id, s.company_name,
+                       (SELECT COUNT(*) FROM products p2
+                         WHERE p2.brand_id = b.id AND p2.status <> 'DELETED') AS product_count,
+                       COALESCE(x.qty, 0) AS qty, COALESCE(x.revenue, 0) AS revenue, COALESCE(x.orders, 0) AS orders
+                  FROM brands b
+                  JOIN sellers s ON s.id = b.seller_id
+                  LEFT JOIN (SELECT p.brand_id,
+                                    SUM(oi.quantity)                 AS qty,
+                                    SUM(oi.quantity * oi.unit_price) AS revenue,
+                                    COUNT(DISTINCT sh.order_id)      AS orders
+                               FROM shipments sh
+                               JOIN order_items oi     ON oi.shipment_id = sh.id
+                               JOIN product_options po ON po.id = oi.option_id
+                               JOIN products p         ON p.id = po.product_id
+                              WHERE sh.created_at >= :from AND sh.created_at < :toExclusive
+                                AND %s
+                              GROUP BY p.brand_id) x ON x.brand_id = b.id
+                 WHERE b.status = 'APPROVED' OR x.brand_id IS NOT NULL
+                 ORDER BY revenue DESC, qty DESC, b.id
+                """.formatted(NOT_CANCELED);
+        return jdbc.query(sql, range(from, to), (rs, i) -> new BrandSales(rs.getLong("id"), rs.getString("name"),
+                rs.getString("status"), rs.getLong("seller_id"), rs.getString("company_name"),
+                rs.getLong("product_count"), rs.getLong("qty"), rs.getLong("revenue"), rs.getLong("orders")));
     }
 
     private static MapSqlParameterSource range(LocalDate from, LocalDate to) {
