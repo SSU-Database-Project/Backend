@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -54,6 +55,10 @@ public class Brand extends BaseTimeEntity {
     @Column(name = "reject_reason")
     private String rejectReason;
 
+    /** 삭제 시각 (V8). DELETED 일 때만 값이 있다 (DB CHECK) */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     private Brand(Seller seller, String name, String description, String logoUrl) {
         this.seller = seller;
         this.name = name;
@@ -64,6 +69,21 @@ public class Brand extends BaseTimeEntity {
 
     public static Brand create(Seller seller, String name, String description, String logoUrl) {
         return new Brand(seller, name, description, logoUrl);
+    }
+
+    /**
+     * 삭제 (V8): 행은 남기고(주문 기록이 상품 → 브랜드를 참조) 상태만 DELETED.
+     * 이름은 'deleted_{id}_원래이름' 으로 바꿔 다른 브랜드가 같은 이름을 다시 쓸 수 있게 한다 (uk_brands_name, 팀 결정).
+     */
+    public void delete(LocalDateTime now) {
+        String renamed = "deleted_" + id + "_" + name;
+        this.name = renamed.length() > 100 ? renamed.substring(0, 100) : renamed;
+        this.status = BrandStatus.DELETED;
+        this.deletedAt = now;
+    }
+
+    public boolean isDeleted() {
+        return status == BrandStatus.DELETED;
     }
 
     public boolean isOwnedBy(Long sellerId) {

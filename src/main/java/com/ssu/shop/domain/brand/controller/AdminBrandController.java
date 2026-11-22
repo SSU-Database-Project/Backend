@@ -15,6 +15,7 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,7 +32,7 @@ public class AdminBrandController {
 
     private final BrandService brandService;
 
-    @Operation(summary = "브랜드 신청 목록")
+    @Operation(summary = "브랜드 신청 목록", description = "status 를 주지 않으면 삭제한 브랜드(DELETED)는 빠진다")
     @GetMapping
     public ApiResponse<PageResponse<AdminBrandResponse>> list(
             @RequestParam(required = false) BrandStatus status,
@@ -46,5 +47,14 @@ public class AdminBrandController {
     public ApiResponse<BrandResponse> changeStatus(@PathVariable Long brandId,
                                                    @Valid @RequestBody BrandStatusChangeRequest request) {
         return ApiResponse.success(brandService.changeStatus(brandId, request));
+    }
+
+    @Operation(summary = "브랜드 삭제",
+            description = "소속 상품은 모두 판매 종료(DELETED), 브랜드명은 다른 브랜드가 다시 쓸 수 있게 된다. "
+                    + "오류: HAS_IN_PROGRESS_ORDERS(409) 이 브랜드 상품의 진행 중 주문이 있음, NOT_FOUND(404) 없거나 이미 삭제됨. "
+                    + "상품 하나만 내리려면 상품 차단(PATCH /api/admin/products/{id}/status, BLOCKED)을 쓴다")
+    @DeleteMapping("/{brandId}")
+    public ApiResponse<BrandResponse> delete(@PathVariable Long brandId) {
+        return ApiResponse.success(brandService.deleteByAdmin(brandId));
     }
 }

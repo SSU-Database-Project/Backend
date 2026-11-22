@@ -1,5 +1,6 @@
 package com.ssu.shop.domain.product.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.ssu.shop.domain.brand.entity.Brand;
 import com.ssu.shop.domain.product.entity.Color;
 import com.ssu.shop.domain.product.entity.Gender;
@@ -49,6 +50,27 @@ public final class ProductDtos {
             @NotNull @Min(0) @Max(30) Integer shipDays,
             @jakarta.validation.constraints.Size(max = 500) String imageUrl,
             @NotEmpty @Valid java.util.List<OptionRequest> options) {
+    }
+
+    /**
+     * 브랜드와 함께 등록하는 첫 상품 (V8, POST /api/seller/brands/with-product). 브랜드 id 만 빼고 ProductCreateRequest 와 같다.
+     */
+    public record InitialProductRequest(
+            @NotNull Long categoryId,
+            @NotBlank @jakarta.validation.constraints.Size(max = 50) String productCode,
+            @NotBlank @jakarta.validation.constraints.Size(max = 200) String name,
+            @jakarta.validation.constraints.Size(max = 5000) String description,
+            @NotNull @PositiveOrZero @Max(100_000_000) Integer price,
+            @NotNull Gender gender,
+            @NotBlank @Pattern(regexp = SEASON_REGEXP, message = SEASON_MESSAGE) String season,
+            @NotNull @Min(0) @Max(30) Integer shipDays,
+            @jakarta.validation.constraints.Size(max = 500) String imageUrl,
+            @NotEmpty @Valid java.util.List<OptionRequest> options) {
+
+        public ProductCreateRequest toCreateRequest(Long brandId) {
+            return new ProductCreateRequest(brandId, categoryId, productCode, name, description, price, gender, season,
+                    shipDays, imageUrl, options);
+        }
     }
 
     /**
@@ -123,14 +145,26 @@ public final class ProductDtos {
             String categoryName,
             Gender gender,
             String season,
-            LocalDateTime createdAt) {
+            LocalDateTime createdAt,
+            /** 판매자·관리자 목록에만 (V8): 옵션별 재고. 상품마다 상세를 다시 부르지 않아도 된다. 구매자 목록에서는 빠진다 */
+            @JsonInclude(JsonInclude.Include.NON_NULL) java.util.List<OptionResponse> options) {
 
         public static ProductSummaryResponse of(Product p, int totalStock) {
+            return of(p, totalStock, null);
+        }
+
+        /** 옵션 포함 (판매자·관리자 목록). 총 재고는 옵션 재고의 합 */
+        public static ProductSummaryResponse withOptions(Product p, java.util.List<ProductOption> options) {
+            return of(p, options.stream().mapToInt(ProductOption::getStockQuantity).sum(),
+                    options.stream().map(OptionResponse::from).toList());
+        }
+
+        private static ProductSummaryResponse of(Product p, int totalStock, java.util.List<OptionResponse> options) {
             Brand brand = p.getBrand();
             return new ProductSummaryResponse(p.getId(), p.getProductCode(), p.getName(), p.getPrice(),
                     p.getImageUrl(), p.getStatus(), p.isSoldOut(totalStock), totalStock,
                     brand.getId(), brand.getName(), p.getCategory().getId(), p.getCategory().getName(),
-                    p.getGender(), p.getSeason(), p.getCreatedAt());
+                    p.getGender(), p.getSeason(), p.getCreatedAt(), options);
         }
     }
 

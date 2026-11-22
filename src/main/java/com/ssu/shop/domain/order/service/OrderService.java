@@ -5,16 +5,23 @@ import com.ssu.shop.domain.cart.repository.CartItemRepository;
 import com.ssu.shop.domain.inventory.service.StockService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
+import com.ssu.shop.domain.order.dto.OrderDtos.PaymentResponse;
+import com.ssu.shop.domain.order.entity.CancelActor;
 import com.ssu.shop.domain.order.entity.Order;
 import com.ssu.shop.domain.order.entity.OrderItem;
 import com.ssu.shop.domain.order.entity.Shipment;
+import com.ssu.shop.domain.order.entity.ShipmentStatus;
 import com.ssu.shop.domain.order.repository.OrderItemRepository;
 import com.ssu.shop.domain.order.repository.OrderRepository;
 import com.ssu.shop.domain.order.repository.ShipmentRepository;
+import com.ssu.shop.domain.payment.entity.Payment;
+import com.ssu.shop.domain.payment.service.PaymentService;
 import com.ssu.shop.domain.product.entity.Product;
 import com.ssu.shop.domain.product.entity.ProductStatus;
 import com.ssu.shop.domain.seller.entity.Seller;
+import com.ssu.shop.domain.user.entity.UserStatus;
 import com.ssu.shop.domain.user.repository.UserRepository;
+import com.ssu.shop.domain.user.repository.UserRepository.UserStatusRow;
 import com.ssu.shop.global.common.PageResponse;
 import com.ssu.shop.global.error.BusinessException;
 import com.ssu.shop.global.error.ErrorCode;
@@ -24,10 +31,13 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -48,13 +58,16 @@ public class OrderService {
     private final StockService stockService;
     private final EntityManager entityManager;
     private final Clock clock;
+    private final PaymentService paymentService;
+    private final ShipmentCanceler shipmentCanceler;
 
     /**
-     * 주문 생성: 장바구니에서 체크한 항목을 주문한다. 전체가 한 트랜잭션이라 중간에 하나라도 실패하면
-     * (재고 부족 등) 주문·재고·재고 이력·장바구니가 모두 주문 전 상태로 돌아간다.
+     * 주문 생성: 장바구니에서 체크한 항목을 주문하고 결제한다. 전체가 한 트랜잭션이라 중간에 하나라도 실패하면
+     * (재고 부족, 결제 거절 등) 주문·재고·재고 이력·장바구니가 모두 주문 전 상태로 돌아간다.
      *
      * 순서
      *  1) 체크한 장바구니 항목 조회 (쿼리 1번)
+     *  1-1) 구매자·판매자 회원 행 잠금 + 둘 다 이용 중인지 확인 (이유는 lockAccounts 주석)
      *  2) 상품 행 잠금 + 최신 값으로 다시 읽기 (이유는 lockProducts 주석)
      *  3) 옵션 행 잠금 — 주문 줄을 저장하기 전에 (이유는 StockService.lock 주석)
      *  4) 판매중이 아닌 상품이 섞여 있으면 주문 전체 거부 — 2) 에서 다시 읽은 상태로 검사한다
@@ -62,8 +75,9 @@ public class OrderService {
      *     주문 줄에 복사하는 상품명·단가와 주문 총액도 2) 에서 다시 읽은 값이다
      *  6) 재고 차감 + 재고 이력 (주문 줄마다 한 번)
      *  7) 주문한 장바구니 항목 삭제
+     *  8) 결제 승인 + 결제 기록 (V7). 금액은 2) 에서 다시 읽은 가격으로 계산한 주문 총액. 거절되면 1)~7) 까지 롤백
      *
-     * 잠그는 순서는 항상 상품(id 오름차순) → 옵션(id 오름차순)이다. 이 순서를 바꾸면 주문끼리, 또는 주문과 상품 변경이
+     * 잠그는 순서는 항상 회원(id 오름차순) → 상품(id 오름차순) → 옵션(id 오름차순)이다. 이 순서를 바꾸면 주문끼리, 또는 주문과 상품 변경이
      * 서로를 기다리다 멈출 수 있다.
      */
     @Transactional
@@ -72,6 +86,7 @@ public class OrderService {
         if (cartItems.isEmpty()) {
             throw new BusinessException(ErrorCode.NO_ORDER_ITEMS);
         }
+        lockAccounts(userId, cartItems);
         lockProducts(cartItems);
         stockService.lock(cartItems.stream().map(item -> item.getOption().getId()).toList());
 
@@ -113,45 +128,46 @@ public class OrderService {
         if (deleted != cartItems.size()) {
             throw new BusinessException(ErrorCode.DATA_CONFLICT, "장바구니가 변경되었습니다. 다시 확인하고 주문해 주세요.");
         }
-        return OrderResponse.of(order, orderItems);
+        Payment payment = paymentService.pay(order, request.payment(), orderedAt);
+        return OrderResponse.of(order, orderItems, paymentService.responseOf(payment));
     }
 
     /**
-     * 내 주문 목록 (최신순). 쿼리는 주문 건수와 상관없이 최대 3번:
-     * 주문 한 페이지 → 전체 건수 → 그 페이지 주문들의 주문 줄 전부(배송 묶음·판매자·옵션·상품 포함).
+     * 내 주문 목록 (최신순). 쿼리는 주문 건수와 상관없이 최대 5번:
+     * 주문 한 페이지 → 전체 건수 → 그 페이지 주문들의 주문 줄 전부(배송 묶음·판매자·옵션·상품 포함) → 결제 → 환불.
      */
     public PageResponse<OrderResponse> myOrders(Long userId, int page, int size) {
         Page<Order> orders = orderRepository.findByUser_IdOrderByCreatedAtDescIdDesc(userId, PageRequest.of(page, size));
         if (orders.isEmpty()) {
             return PageResponse.of(orders, List.of());
         }
+        List<Long> orderIds = orders.map(Order::getId).getContent();
         Map<Long, List<OrderItem>> itemsByOrder = orderItemRepository
-                .findAllWithDetailsByOrderIds(orders.map(Order::getId).getContent()).stream()
+                .findAllWithDetailsByOrderIds(orderIds).stream()
                 .collect(Collectors.groupingBy(item -> item.getShipment().getOrder().getId()));
-        return PageResponse.of(orders, order -> OrderResponse.of(order, itemsByOrder.get(order.getId())));
+        Map<Long, PaymentResponse> paymentByOrder = paymentService.responsesByOrderId(orderIds);
+        return PageResponse.of(orders, order -> OrderResponse.of(order, itemsByOrder.get(order.getId()),
+                paymentByOrder.get(order.getId())));
     }
 
     /** 내 주문 상세. 남의 주문은 없는 것처럼 NOT_FOUND */
     public OrderResponse getMyOrder(Long userId, Long orderId) {
         Order order = orderRepository.findByIdAndUser_Id(orderId, userId)
                 .orElseThrow(() -> BusinessException.notFound("주문"));
-        return OrderResponse.of(order, orderItemRepository.findAllWithDetailsByOrderIds(List.of(orderId)));
+        return OrderResponse.of(order, orderItemRepository.findAllWithDetailsByOrderIds(List.of(orderId)),
+                paymentService.responsesByOrderId(List.of(orderId)).get(orderId));
     }
 
     /**
-     * 구매자 취소: 배송 묶음(판매자) 단위, 주문완료(ORDERED)일 때만.
-     * 상태 변경과 그 묶음 전체 줄의 재고 복원이 한 트랜잭션이다. 주문의 total_price 는 바꾸지 않는다.
-     *
-     * 조건부 UPDATE 가 1 을 돌려준 요청만 재고를 복원하므로, 취소를 동시에 두 번 눌러도 재고는 한 번만 돌아오고
-     * 판매자의 "배송준비" 처리와 동시에 와도 둘 중 하나만 성공한다.
+     * 구매자 취소: 배송 묶음(판매자) 단위, 주문완료(ORDERED)일 때만. 사유는 선택 (V8).
+     * 상태 변경, 그 묶음 전체 줄의 재고 복원, 부분 환불 기록(V7)이 한 트랜잭션이다 (ShipmentCanceler).
+     * 주문의 total_price 는 바꾸지 않는다. 판매자의 "배송준비"·판매자 취소와 동시에 와도 하나만 성공한다.
      */
     @Transactional
-    public OrderResponse cancel(Long userId, Long orderId, Long shipmentId) {
+    public OrderResponse cancel(Long userId, Long orderId, Long shipmentId, String reason) {
         checkMyShipment(userId, orderId, shipmentId);
-        if (shipmentRepository.cancel(shipmentId, now()) == 0) {
-            throw new BusinessException(ErrorCode.INVALID_ORDER_STATUS, "주문완료 상태에서만 취소할 수 있습니다.");
-        }
-        stockService.restore(orderItemRepository.findAllByShipment_Id(shipmentId));
+        shipmentCanceler.cancel(orderId, shipmentId, EnumSet.of(ShipmentStatus.ORDERED), CancelActor.BUYER,
+                reason == null || reason.isBlank() ? null : reason.trim(), "주문완료 상태에서만 취소할 수 있습니다.");
         return getMyOrder(userId, orderId);
     }
 
@@ -178,6 +194,35 @@ public class OrderService {
     /** DB 의 DATETIME(6) 에 맞춰 마이크로초까지만 남긴다 */
     private LocalDateTime now() {
         return LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /**
+     * 구매자와 판매자들의 회원 행을 id 오름차순으로 잠그고(공유 잠금, FOR SHARE) 모두 이용 중(ACTIVE)인지 본다.
+     *  - 정지된 판매자의 상품은 주문할 수 없다 (팀 결정, 2026-11-17): 정지된 판매자는 로그인을 못 해 배송할 수 없다.
+     *  - 관리자의 정지·탈퇴(AccountLifecycle)는 같은 회원 행을 FOR UPDATE 로 잠근다. 그래서 둘이 동시에 오면 한쪽이 기다린다:
+     *    주문이 먼저면 관리자가 이 주문까지 세어 "진행 중인 주문"으로 거절하고, 관리자가 먼저면 여기서 바뀐 상태를 보고 거절한다.
+     * 상품보다 먼저 잠근다. 판매자 탈퇴도 회원 → 상품 순서로 잠그므로 서로 기다리다 멈추지 않는다.
+     */
+    private void lockAccounts(Long buyerId, List<CartItem> cartItems) {
+        Set<Long> userIds = new TreeSet<>();
+        userIds.add(buyerId);
+        Map<Long, String> productNameBySellerUser = new LinkedHashMap<>();
+        for (CartItem cartItem : cartItems) {
+            Product product = cartItem.getOption().getProduct();
+            Long sellerUserId = product.getSeller().getUser().getId();
+            userIds.add(sellerUserId);
+            productNameBySellerUser.putIfAbsent(sellerUserId, product.getName());
+        }
+        for (UserStatusRow row : userRepository.lockStatuses(userIds)) {
+            if (UserStatus.ACTIVE.name().equals(row.getStatus())) {
+                continue;
+            }
+            if (row.getId().equals(buyerId)) {
+                throw new BusinessException(ErrorCode.ACCOUNT_SUSPENDED);
+            }
+            throw new BusinessException(ErrorCode.PRODUCT_NOT_PURCHASABLE,
+                    "지금 구매할 수 없는 상품입니다: " + productNameBySellerUser.get(row.getId()));
+        }
     }
 
     /**

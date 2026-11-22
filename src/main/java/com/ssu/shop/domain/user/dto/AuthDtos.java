@@ -3,6 +3,7 @@ package com.ssu.shop.domain.user.dto;
 import com.ssu.shop.domain.seller.entity.Seller;
 import com.ssu.shop.domain.user.entity.Role;
 import com.ssu.shop.domain.user.entity.User;
+import com.ssu.shop.domain.user.entity.UserStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -11,6 +12,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.time.LocalDateTime;
 
 public final class AuthDtos {
 
@@ -65,19 +67,24 @@ public final class AuthDtos {
         }
     }
 
-    /** GET /api/users/me — role 로 FE 가 화면(일반회원 / 판매자 / 관리자)을 나눈다 */
-    public record MeResponse(Long id, String email, String name, String phone, Role role, SellerInfo seller) {
+    /**
+     * GET /api/users/me — 마이페이지 계정 정보. role 로 FE 가 화면(일반회원 / 판매자 / 관리자)을 나눈다.
+     * email 이 로그인 계정명이다. seller 는 판매자만 (아니면 null).
+     */
+    public record MeResponse(Long id, String email, String name, String phone, Role role, UserStatus status,
+                             LocalDateTime createdAt, SellerInfo seller) {
 
         public static MeResponse of(User user, Seller sellerOrNull) {
             return new MeResponse(user.getId(), user.getEmail(), user.getName(), user.getPhone(), user.getRole(),
-                    sellerOrNull == null ? null : SellerInfo.from(sellerOrNull));
+                    user.getStatus(), user.getCreatedAt(), sellerOrNull == null ? null : SellerInfo.from(sellerOrNull));
         }
     }
 
-    public record SellerInfo(Long sellerId, String companyName, String businessNumber) {
+    public record SellerInfo(Long sellerId, String companyName, String representativeName, String businessNumber) {
 
         public static SellerInfo from(Seller seller) {
-            return new SellerInfo(seller.getId(), seller.getCompanyName(), seller.getBusinessNumber());
+            return new SellerInfo(seller.getId(), seller.getCompanyName(), seller.getRepresentativeName(),
+                    seller.getBusinessNumber());
         }
     }
 }

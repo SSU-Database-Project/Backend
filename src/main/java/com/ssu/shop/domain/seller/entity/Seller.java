@@ -53,4 +53,10 @@ public class Seller extends BaseTimeEntity {
     public static Seller create(User user, String businessNumber, String companyName, String representativeName) {
         return new Seller(user, businessNumber, companyName, representativeName);
     }
+
+    /** 마이페이지에서 상호·대표자명 수정. 사업자번호는 가입 때 값으로 고정한다 (팀 결정). */
+    public void updateInfo(String companyName, String representativeName) {
+        this.companyName = companyName;
+        this.representativeName = representativeName;
+    }
 }

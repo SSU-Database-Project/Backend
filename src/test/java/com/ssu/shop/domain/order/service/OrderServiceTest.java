@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -20,6 +21,9 @@ import com.ssu.shop.domain.cart.repository.CartItemRepository;
 import com.ssu.shop.domain.category.entity.Category;
 import com.ssu.shop.domain.inventory.service.StockService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
+import com.ssu.shop.domain.order.dto.OrderDtos.PaymentRequest;
+import com.ssu.shop.domain.payment.entity.PaymentMethod;
+import com.ssu.shop.domain.payment.service.PaymentService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
 import com.ssu.shop.domain.order.dto.OrderDtos.ShipmentResponse;
 import com.ssu.shop.domain.order.entity.Order;
@@ -64,7 +68,8 @@ class OrderServiceTest {
     static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
     static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-15T01:00:00Z"), SEOUL); // 서울 10:00
     static final OrderCreateRequest REQUEST =
-            new OrderCreateRequest("최구매", "010-2222-0001", "06978", "서울특별시 동작구 상도로 369", "101동");
+            new OrderCreateRequest("최구매", "010-2222-0001", "06978", "서울특별시 동작구 상도로 369", "101동",
+                    new PaymentRequest(PaymentMethod.CARD, "1234-5678-9012-3456"));
 
     @Mock
     CartItemRepository cartItemRepository;
@@ -80,6 +85,10 @@ class OrderServiceTest {
     StockService stockService;
     @Mock
     EntityManager entityManager;
+    @Mock
+    PaymentService paymentService;
+    @Mock
+    ShipmentCanceler shipmentCanceler;
 
     OrderService orderService;
 
@@ -91,7 +100,7 @@ class OrderServiceTest {
     @BeforeEach
     void setUp() {
         orderService = new OrderService(cartItemRepository, orderRepository, shipmentRepository, orderItemRepository,
-                userRepository, stockService, entityManager, CLOCK);
+                userRepository, stockService, entityManager, CLOCK, paymentService, shipmentCanceler);
         sellerA = Fixtures.seller(1L, Fixtures.user(1L, "a@test.com"));
         sellerB = Fixtures.seller(2L, Fixtures.user(2L, "b@test.com"));
         leaf = Fixtures.leafCategory(11L, Fixtures.rootCategory(1L, SizeGroup.CLOTHING));
@@ -147,6 +156,66 @@ class OrderServiceTest {
         // 읽은 그대로인지(수량) 조건을 붙여 한 줄씩 지운다
         order.verify(cartItemRepository).deleteIfUnchanged(tee.getId(), 2);
         order.verify(cartItemRepository).deleteIfUnchanged(cap.getId(), 1);
+    }
+
+    @Test
+    void 결제는_다른_처리를_모두_마친_뒤_서버가_계산한_주문으로_승인하고_거절되면_예외가_그대로_나간다() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 2);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee));
+        when(paymentService.pay(any(Order.class), eq(REQUEST.payment()), any()))
+                .thenThrow(new BusinessException(ErrorCode.PAYMENT_DECLINED, "카드사에서 승인을 거절했습니다."));
+
+        assertThatThrownBy(() -> orderService.create(BUYER, REQUEST))
+                .extracting("errorCode").isEqualTo(ErrorCode.PAYMENT_DECLINED);
+
+        InOrder order = inOrder(stockService, cartItemRepository, paymentService);
+        order.verify(stockService).decrease(anyList());
+        order.verify(cartItemRepository).deleteIfUnchanged(tee.getId(), 2);
+        ArgumentCaptor<Order> paid = ArgumentCaptor.forClass(Order.class);
+        order.verify(paymentService).pay(paid.capture(), eq(REQUEST.payment()),
+                eq(LocalDateTime.of(2026, 11, 15, 10, 0)));
+        assertThat(paid.getValue().getTotalPrice()).isEqualTo(20_000L); // 금액은 요청이 아니라 주문 총액
+    }
+
+    @Test
+    void 정지된_판매자의_상품이_있으면_주문_전체를_거부하고_회원을_상품보다_먼저_잠근다() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
+        CartItem cap = cartItem(sellerB, "모자", 19_000, ProductStatus.ON_SALE, 1);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee, cap));
+        when(userRepository.lockStatuses(java.util.Set.of(BUYER, 1L, 2L)))
+                .thenReturn(List.of(statusRow(1L, "ACTIVE"), statusRow(2L, "SUSPENDED"), statusRow(BUYER, "ACTIVE")));
+
+        assertThatThrownBy(() -> orderService.create(BUYER, REQUEST))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("모자")
+                .extracting("errorCode").isEqualTo(ErrorCode.PRODUCT_NOT_PURCHASABLE);
+        verify(stockService, org.mockito.Mockito.never()).lock(anyList());
+        verify(orderRepository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void 주문하는_사이_구매자가_정지되면_ACCOUNT_SUSPENDED() {
+        CartItem tee = cartItem(sellerA, "티셔츠", 10_000, ProductStatus.ON_SALE, 1);
+        when(cartItemRepository.findSelectedForOrder(BUYER)).thenReturn(List.of(tee));
+        when(userRepository.lockStatuses(java.util.Set.of(BUYER, 1L)))
+                .thenReturn(List.of(statusRow(1L, "ACTIVE"), statusRow(BUYER, "SUSPENDED")));
+
+        assertThatThrownBy(() -> orderService.create(BUYER, REQUEST))
+                .extracting("errorCode").isEqualTo(ErrorCode.ACCOUNT_SUSPENDED);
+    }
+
+    private static com.ssu.shop.domain.user.repository.UserRepository.UserStatusRow statusRow(Long id, String status) {
+        return new com.ssu.shop.domain.user.repository.UserRepository.UserStatusRow() {
+            @Override
+            public Long getId() {
+                return id;
+            }
+
+            @Override
+            public String getStatus() {
+                return status;
+            }
+        };
     }
 
     @Test

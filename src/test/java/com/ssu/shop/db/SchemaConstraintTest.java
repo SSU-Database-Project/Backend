@@ -170,12 +170,14 @@ class SchemaConstraintTest {
     @Test
     void 배송_취소_구매확정_상태와_시각은_항상_함께_존재한다() {
         long shipmentId = insertShipment(insertOrder(insertUser("cancel@test.com", "USER")), sellerA);
-        assertThatThrownBy(() -> jdbc.update("UPDATE shipments SET status = 'CANCELED' WHERE id = ?", shipmentId))
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE shipments SET status = 'CANCELED', canceled_by = 'BUYER' WHERE id = ?", shipmentId))
                 .hasMessageContaining("ck_shipments_canceled_at");
         assertThatThrownBy(() -> jdbc.update("UPDATE shipments SET status = 'CONFIRMED' WHERE id = ?", shipmentId))
                 .hasMessageContaining("ck_shipments_confirmed_at");
         assertThatCode(() -> jdbc.update(
-                "UPDATE shipments SET status = 'CANCELED', canceled_at = NOW(6) WHERE id = ?", shipmentId))
+                "UPDATE shipments SET status = 'CANCELED', canceled_at = NOW(6), canceled_by = 'BUYER' WHERE id = ?",
+                shipmentId))
                 .doesNotThrowAnyException();
     }
 

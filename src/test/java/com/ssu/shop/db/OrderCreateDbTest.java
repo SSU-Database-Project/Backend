@@ -12,6 +12,8 @@ import com.ssu.shop.domain.cart.dto.CartDtos.CartResponse;
 import com.ssu.shop.domain.cart.repository.CartItemRepository;
 import com.ssu.shop.domain.cart.service.CartService;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderCreateRequest;
+import com.ssu.shop.domain.order.dto.OrderDtos.PaymentRequest;
+import com.ssu.shop.domain.payment.entity.PaymentMethod;
 import com.ssu.shop.domain.order.dto.OrderDtos.OrderResponse;
 import com.ssu.shop.domain.order.entity.ShipmentStatus;
 import com.ssu.shop.domain.order.service.OrderService;
@@ -67,7 +69,8 @@ class OrderCreateDbTest {
 
     static final LocalDateTime ORDERED_AT = LocalDateTime.of(2000, 1, 1, 10, 0);
     static final OrderCreateRequest ADDRESS =
-            new OrderCreateRequest("테스트", "010-1234-5678", "06978", "서울특별시 동작구 상도로 369", "주문 테스트");
+            new OrderCreateRequest("테스트", "010-1234-5678", "06978", "서울특별시 동작구 상도로 369", "주문 테스트",
+                    new PaymentRequest(PaymentMethod.CARD, "1234-5678-9012-3456"));
 
     @TestConfiguration
     static class FixedClock {

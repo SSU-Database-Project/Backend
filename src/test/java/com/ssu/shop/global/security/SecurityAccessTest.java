@@ -69,7 +69,7 @@ class SecurityAccessTest {
         ReflectionTestUtils.setField(user, "role", role);
         ReflectionTestUtils.setField(user, "status", status);
         when(userRepository.findById(id)).thenReturn(Optional.of(user));
-        return "Bearer " + jwtProvider.createAccessToken(id, role);
+        return "Bearer " + jwtProvider.createAccessToken(id, role, user.startNewLoginSession());
     }
 
     @Test
@@ -131,7 +131,7 @@ class SecurityAccessTest {
     @Test
     void 토큰의_role이_아니라_DB의_최신_role로_판단한다() throws Exception {
         User user = Fixtures.user(3L, "u3@test.com", Role.USER);
-        String forgedRoleToken = "Bearer " + jwtProvider.createAccessToken(3L, Role.SELLER);
+        String forgedRoleToken = "Bearer " + jwtProvider.createAccessToken(3L, Role.SELLER, user.startNewLoginSession());
         when(userRepository.findById(3L)).thenReturn(Optional.of(user));
 
         mockMvc.perform(get("/api/seller/products").header(HttpHeaders.AUTHORIZATION, forgedRoleToken))
@@ -149,6 +149,46 @@ class SecurityAccessTest {
     void 탈퇴한_회원의_토큰도_401() throws Exception {
         mockMvc.perform(get("/api/products")
                         .header(HttpHeaders.AUTHORIZATION, tokenFor(5L, Role.USER, UserStatus.WITHDRAWN)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ===== 동시 로그인 방지 =====
+
+    @Test
+    void 다른_곳에서_새로_로그인하면_이전_토큰은_401_LOGGED_IN_ELSEWHERE() throws Exception {
+        User user = Fixtures.user(7L, "u7@test.com");
+        String oldToken = "Bearer " + jwtProvider.createAccessToken(7L, Role.USER, user.startNewLoginSession());
+        String newToken = "Bearer " + jwtProvider.createAccessToken(7L, Role.USER, user.startNewLoginSession());
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(productService.searchPublic(any(), any(), any(), any(), anyInt(), anyInt())).thenReturn((PageResponse) EMPTY);
+
+        mockMvc.perform(get("/api/products").header(HttpHeaders.AUTHORIZATION, oldToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("LOGGED_IN_ELSEWHERE"));
+        mockMvc.perform(get("/api/products").header(HttpHeaders.AUTHORIZATION, newToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void 비밀번호를_바꿔_로그인이_끊기면_401_LOGIN_EXPIRED() throws Exception {
+        User user = Fixtures.user(8L, "u8@test.com");
+        String token = "Bearer " + jwtProvider.createAccessToken(8L, Role.USER, user.startNewLoginSession());
+        user.changePassword("{noop}new-password");
+        when(userRepository.findById(8L)).thenReturn(Optional.of(user));
+
+        mockMvc.perform(get("/api/products").header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("LOGIN_EXPIRED"));
+    }
+
+    @Test
+    void 로그인_식별값이_없는_예전_토큰은_401() throws Exception {
+        User user = Fixtures.user(9L, "u9@test.com");
+        user.startNewLoginSession();
+        String legacyToken = "Bearer " + jwtProvider.createAccessToken(9L, Role.USER, null);
+        when(userRepository.findById(9L)).thenReturn(Optional.of(user));
+
+        mockMvc.perform(get("/api/products").header(HttpHeaders.AUTHORIZATION, legacyToken))
                 .andExpect(status().isUnauthorized());
     }
 

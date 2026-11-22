@@ -50,6 +50,15 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
             """)
     List<Long> findActiveIdsBySeller(@Param("sellerId") Long sellerId);
 
+    /** 브랜드의 아직 삭제되지 않은 상품 id, 오름차순 (브랜드 삭제 시 잠그는 순서 = 주문과 같은 순서) */
+    @Query("""
+            select p.id from Product p
+             where p.brand.id = :brandId
+               and p.status <> com.ssu.shop.domain.product.entity.ProductStatus.DELETED
+             order by p.id
+            """)
+    List<Long> findActiveIdsByBrand(@Param("brandId") Long brandId);
+
     /**
      * 상품 하나를 판매 종료(DELETED). PK 로 한 행만 찾으므로 그 행 하나만 잠근다.
      * clearAutomatically 를 쓰지 않는다: 영속성 컨텍스트를 비우면 같은 트랜잭션에서 읽어 둔 엔티티(예: 탈퇴시킬 회원)가

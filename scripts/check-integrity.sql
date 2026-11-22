@@ -100,4 +100,40 @@ UNION ALL
 SELECT '15 구매확정·취소 시각은 주문 이후, 지금 이전', COUNT(*)
 FROM shipments sh JOIN orders o ON o.id = sh.order_id
 WHERE COALESCE(sh.confirmed_at, sh.canceled_at, o.created_at) < o.created_at
-   OR COALESCE(sh.confirmed_at, sh.canceled_at, o.created_at) > NOW(6);
+   OR COALESCE(sh.confirmed_at, sh.canceled_at, o.created_at) > NOW(6)
+
+-- ----- 모의 결제 (V7). V7 이전 주문은 결제가 없을 수 있어, 결제가 있는 주문만 검사한다 -----
+UNION ALL
+SELECT '16 결제 금액 = 주문 총액', COUNT(*)
+FROM payments p JOIN orders o ON o.id = p.order_id
+WHERE p.amount <> o.total_price
+
+UNION ALL
+SELECT '17 결제 시각 = 주문 시각', COUNT(*)
+FROM payments p JOIN orders o ON o.id = p.order_id
+WHERE p.paid_at <> o.created_at
+
+UNION ALL
+SELECT '18 결제한 주문의 취소된 배송 묶음은 환불 1건, 아니면 0건', COUNT(*)
+FROM shipments sh
+JOIN payments p ON p.order_id = sh.order_id
+WHERE (SELECT COUNT(*) FROM payment_refunds r WHERE r.shipment_id = sh.id) <> IF(sh.status = 'CANCELED', 1, 0)
+
+UNION ALL
+SELECT '19 환불 금액 = 그 배송 묶음 주문 라인 합계, 환불 시각 = 취소 시각', COUNT(*)
+FROM payment_refunds r
+JOIN shipments sh ON sh.id = r.shipment_id
+WHERE r.amount <> (SELECT SUM(oi.unit_price * oi.quantity) FROM order_items oi WHERE oi.shipment_id = sh.id)
+   OR r.refunded_at <> sh.canceled_at
+
+UNION ALL
+SELECT '20 환불은 같은 주문의 결제에 대한 것', COUNT(*)
+FROM payment_refunds r
+JOIN payments p   ON p.id = r.payment_id
+JOIN shipments sh ON sh.id = r.shipment_id
+WHERE p.order_id <> sh.order_id
+
+UNION ALL
+SELECT '21 환불 합계 <= 결제 금액', COUNT(*)
+FROM payments p
+WHERE p.amount < (SELECT COALESCE(SUM(r.amount), 0) FROM payment_refunds r WHERE r.payment_id = p.id);

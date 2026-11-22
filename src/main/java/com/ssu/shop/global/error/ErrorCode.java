@@ -14,10 +14,17 @@ public enum ErrorCode {
     INVALID_OPTION(HttpStatus.BAD_REQUEST, "상품 옵션(색상·사이즈)이 올바르지 않습니다."),
     INVALID_FILE(HttpStatus.BAD_REQUEST, "업로드할 수 없는 파일입니다."),
     NO_ORDER_ITEMS(HttpStatus.BAD_REQUEST, "주문할 상품이 없습니다. 장바구니에서 주문할 상품을 체크해 주세요."),
+    // 로그인한 상태에서 비밀번호를 다시 확인할 때 (401 이면 FE 가 로그아웃으로 오해하므로 400)
+    PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "비밀번호가 올바르지 않습니다."),
 
     // 401
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다. 토큰이 없거나 만료되었습니다."),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
+    LOGGED_IN_ELSEWHERE(HttpStatus.UNAUTHORIZED, "다른 곳에서 로그인되어 로그아웃되었습니다."),
+    LOGIN_EXPIRED(HttpStatus.UNAUTHORIZED, "로그인 정보가 바뀌어 로그아웃되었습니다. 다시 로그인해 주세요."),
+
+    // 402 (모의 결제 승인 거절, V7)
+    PAYMENT_DECLINED(HttpStatus.PAYMENT_REQUIRED, "결제가 승인되지 않았습니다."),
 
     // 403
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
@@ -43,6 +50,8 @@ public enum ErrorCode {
     PRODUCT_NOT_APPROVED(HttpStatus.CONFLICT, "승인된 상품만 판매 상태를 바꿀 수 있습니다."),
     INVALID_STATUS_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서는 변경할 수 없습니다."),
     DATA_CONFLICT(HttpStatus.CONFLICT, "데이터 제약 조건에 위배됩니다."),
+    // 주문완료·배송준비·배송중 주문이 있는 회원의 정지·탈퇴 (팀 결정)
+    HAS_IN_PROGRESS_ORDERS(HttpStatus.CONFLICT, "진행 중인 주문이 있어 처리할 수 없습니다."),
     // BE-2 (Inventory / Order) 용
     OUT_OF_STOCK(HttpStatus.CONFLICT, "재고가 부족합니다."),
     INVALID_ORDER_STATUS(HttpStatus.CONFLICT, "현재 주문 상태에서는 처리할 수 없습니다."),

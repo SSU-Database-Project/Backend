@@ -76,7 +76,10 @@ public class AuthService {
     /**
      * 이메일 존재 여부와 비밀번호 불일치를 구분하지 않는다(계정 존재 여부 노출 방지).
      * 탈퇴 회원은 이메일이 바뀌어 있어 여기서 찾히지 않는다.
+     * 동시 로그인 방지: 로그인할 때마다 새 로그인 식별값을 저장하고 토큰에 넣는다 → 이전에 받은 토큰은 바로 무효
+     * (그 토큰으로 요청하면 401 LOGGED_IN_ELSEWHERE).
      */
+    @Transactional
     public TokenResponse login(LoginRequest request) {
         User user = userRepository.findByEmail(normalizeEmail(request.email()))
                 .filter(u -> !u.isWithdrawn())
@@ -85,7 +88,7 @@ public class AuthService {
         if (!user.isActive()) {
             throw new BusinessException(ErrorCode.ACCOUNT_SUSPENDED);
         }
-        String token = jwtProvider.createAccessToken(user.getId(), user.getRole());
+        String token = jwtProvider.createAccessToken(user.getId(), user.getRole(), user.startNewLoginSession());
         return TokenResponse.bearer(token, jwtProvider.getValiditySeconds(), toMe(user));
     }
 
